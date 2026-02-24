@@ -1,0 +1,10 @@
+[package]
+name = "embedding-poc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# ort 2.0.0-rc.11 是当前最新预发布版（onnxruntime 友好封装）
+ort = { version = "2.0.0-rc.11", features = ["download-binaries"] }
+ndarray = "0.16"
+anyhow = "1"
