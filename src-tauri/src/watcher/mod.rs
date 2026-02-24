@@ -26,16 +26,23 @@ pub fn start_watcher(app: AppHandle) {
         let app_clone = app.clone();
         let (tx, rx) = std::sync::mpsc::channel::<notify::Result<Event>>();
 
-        let mut watcher = RecommendedWatcher::new(
+        let mut watcher = match RecommendedWatcher::new(
             move |res| {
                 let _ = tx.send(res);
             },
             notify::Config::default().with_poll_interval(Duration::from_secs(2)),
-        )
-        .unwrap();
+        ) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("[watcher] Failed to create watcher: {e}");
+                return;
+            }
+        };
 
         for folder in &folders {
-            let _ = watcher.watch(std::path::Path::new(folder), RecursiveMode::Recursive);
+            if let Err(e) = watcher.watch(std::path::Path::new(folder), RecursiveMode::Recursive) {
+                eprintln!("[watcher] Failed to watch '{folder}': {e}");
+            }
         }
 
         for res in rx {
