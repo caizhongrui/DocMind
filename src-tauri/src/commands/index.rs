@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 #[tauri::command]
 pub fn start_index(
@@ -7,18 +7,35 @@ pub fn start_index(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<String, String> {
-    let path = std::path::Path::new(&folder);
+    // 立即将文件夹写入 DB
     {
-        let db = state.db.lock().unwrap();
+        let db = state.db.lock().map_err(|_| "db lock poisoned".to_string())?;
         db.execute(
             "INSERT OR IGNORE INTO watched_folders (path) VALUES (?1)",
             [&folder],
         )
         .map_err(|e| e.to_string())?;
     }
-    crate::indexer::scan_and_index(path, &state, &app)
-        .map(|_| "ok".to_string())
-        .map_err(|e| e.to_string())
+
+    // 后台线程执行索引，立即返回，不阻塞 IPC
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let path = std::path::Path::new(&folder);
+        match crate::indexer::scan_and_index(path, &state, &app) {
+            Ok(_) => {
+                let _ = app.emit("index-complete", &folder);
+            }
+            Err(e) => {
+                eprintln!("[index] scan error for {folder}: {e}");
+                let _ = app.emit(
+                    "index-error",
+                    serde_json::json!({ "folder": folder, "error": e.to_string() }),
+                );
+            }
+        }
+    });
+
+    Ok("started".to_string())
 }
 
 #[tauri::command]

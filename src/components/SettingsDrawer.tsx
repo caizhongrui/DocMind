@@ -18,7 +18,7 @@ interface Props {
 
 export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
   const [folders, setFolders] = useState<string[]>([]);
-  const [indexing, setIndexing] = useState<string | null>(null); // 正在索引的文件夹路径
+  const [indexing, setIndexing] = useState<string | null>(null);
   const [progress, setProgress] = useState<IndexProgress | null>(null);
 
   const loadFolders = useCallback(() => {
@@ -31,23 +31,50 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
     if (drawerOpen) loadFolders();
   }, [drawerOpen, loadFolders]);
 
-  // 监听索引进度
+  // 监听索引进度及完成/失败事件
   useEffect(() => {
     let cancelled = false;
-    let unlistenFn: (() => void) | null = null;
+    let unlistenProgress: (() => void) | null = null;
+    let unlistenComplete: (() => void) | null = null;
+    let unlistenError: (() => void) | null = null;
 
     listen<IndexProgress>("index-progress", (e) => {
       if (!cancelled) setProgress(e.payload);
     }).then((f) => {
       if (cancelled) f();
-      else unlistenFn = f;
+      else unlistenProgress = f;
+    });
+
+    listen<string>("index-complete", () => {
+      if (!cancelled) {
+        message.success("索引完成");
+        setIndexing(null);
+        setProgress(null);
+        loadFolders();
+      }
+    }).then((f) => {
+      if (cancelled) f();
+      else unlistenComplete = f;
+    });
+
+    listen<{ folder: string; error: string }>("index-error", (e) => {
+      if (!cancelled) {
+        message.error(`索引失败：${e.payload.error}`);
+        setIndexing(null);
+        setProgress(null);
+      }
+    }).then((f) => {
+      if (cancelled) f();
+      else unlistenError = f;
     });
 
     return () => {
       cancelled = true;
-      if (unlistenFn) unlistenFn();
+      if (unlistenProgress) unlistenProgress();
+      if (unlistenComplete) unlistenComplete();
+      if (unlistenError) unlistenError();
     };
-  }, []);
+  }, [loadFolders]);
 
   const addFolder = async () => {
     const selected = await open({ directory: true });
@@ -57,11 +84,9 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
     setProgress(null);
     try {
       await invoke("start_index", { folder });
-      message.success("索引完成");
-      loadFolders();
+      // start_index 立即返回，完成由 index-complete 事件处理
     } catch (e: unknown) {
       message.error(`索引失败：${e instanceof Error ? e.message : String(e)}`);
-    } finally {
       setIndexing(null);
       setProgress(null);
     }
@@ -72,10 +97,9 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
     setProgress(null);
     try {
       await invoke("start_index", { folder });
-      message.success("重新索引完成");
+      // start_index 立即返回，完成由 index-complete 事件处理
     } catch (e: unknown) {
       message.error(`索引失败：${e instanceof Error ? e.message : String(e)}`);
-    } finally {
       setIndexing(null);
       setProgress(null);
     }

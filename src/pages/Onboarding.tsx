@@ -1,4 +1,4 @@
-import { Button, Steps, Typography } from "antd";
+import { Button, Steps, Typography, message } from "antd";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -11,7 +11,9 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
 
   useEffect(() => {
     let cancelled = false;
-    let unlistenFn: (() => void) | null = null;
+    let unlistenProgress: (() => void) | null = null;
+    let unlistenComplete: (() => void) | null = null;
+    let unlistenError: (() => void) | null = null;
 
     listen<{ done: number; total: number; current: string }>(
       "index-progress",
@@ -19,16 +21,32 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
         if (!cancelled) setProgress(e.payload);
       }
     ).then((f) => {
-      if (cancelled) {
-        f();
-      } else {
-        unlistenFn = f;
+      if (cancelled) f();
+      else unlistenProgress = f;
+    });
+
+    listen<string>("index-complete", () => {
+      if (!cancelled) setCurrent(3);
+    }).then((f) => {
+      if (cancelled) f();
+      else unlistenComplete = f;
+    });
+
+    listen<{ folder: string; error: string }>("index-error", (e) => {
+      if (!cancelled) {
+        message.error(`索引失败：${e.payload.error}`);
+        setCurrent(1);
       }
+    }).then((f) => {
+      if (cancelled) f();
+      else unlistenError = f;
     });
 
     return () => {
       cancelled = true;
-      if (unlistenFn) unlistenFn();
+      if (unlistenProgress) unlistenProgress();
+      if (unlistenComplete) unlistenComplete();
+      if (unlistenError) unlistenError();
     };
   }, []);
 
@@ -36,14 +54,19 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
     const selected = await open({ directory: true });
     if (selected) {
       setFolder(selected as string);
-      setCurrent(1); // 选择后自动推进到"开始索引"步骤
+      setCurrent(1);
     }
   };
 
   const startIndex = async () => {
     setCurrent(2);
-    await invoke("start_index", { folder });
-    setCurrent(3);
+    try {
+      await invoke("start_index", { folder });
+      // start_index 立即返回，index-complete 事件触发后推进到步骤 3
+    } catch (e) {
+      message.error(String(e));
+      setCurrent(1);
+    }
   };
 
   return (
@@ -61,7 +84,7 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
             description:
               progress.total > 0
                 ? `${progress.done}/${progress.total} - ${progress.current}`
-                : "",
+                : "正在扫描文件...",
           },
           { title: "完成" },
         ]}
