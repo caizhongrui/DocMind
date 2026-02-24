@@ -1,51 +1,24 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { Layout } from "antd";
+import SearchBar from "./components/SearchBar";
+import ResultList from "./components/ResultList";
+import PreviewPanel from "./components/PreviewPanel";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+const { Header, Content, Sider } = Layout;
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
-
+export default function App() {
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+    <Layout style={{ height: "100vh" }}>
+      <Header style={{ padding: "0 16px", display: "flex", alignItems: "center", background: "#fff", borderBottom: "1px solid #eee" }}>
+        <SearchBar />
+      </Header>
+      <Layout>
+        <Content style={{ overflow: "auto" }}>
+          <ResultList />
+        </Content>
+        <Sider width={400} style={{ overflow: "auto", borderLeft: "1px solid #eee", background: "#fff" }}>
+          <PreviewPanel />
+        </Sider>
+      </Layout>
+    </Layout>
   );
 }
-
-export default App;
