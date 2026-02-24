@@ -12,13 +12,13 @@ interface SearchResult {
 
 interface SearchStore {
   query: string;
-  mode: "filename" | "fulltext";
+  mode: "filename" | "fulltext" | "semantic";
   results: SearchResult[];
   selected: SearchResult | null;
   loading: boolean;
   error: string | null;
   setQuery: (q: string) => void;
-  setMode: (m: "filename" | "fulltext") => void;
+  setMode: (m: "filename" | "fulltext" | "semantic") => void;
   setSelected: (r: SearchResult | null) => void;
   doSearch: () => Promise<void>;
 }
@@ -31,7 +31,7 @@ export const useSearchStore = create<SearchStore>((set, get) => ({
   loading: false,
   error: null,
   setQuery: (query) => set({ query }),
-  setMode: (mode) => set({ mode }),
+  setMode: (mode) => set({ mode, results: [], selected: null }),
   setSelected: (selected) => set({ selected }),
   doSearch: async () => {
     const { query, mode } = get();
