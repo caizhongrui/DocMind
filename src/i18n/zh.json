@@ -1,0 +1,31 @@
+{
+  "search": {
+    "placeholder": "搜索文件内容...",
+    "fulltext": "全文",
+    "filename": "文件名",
+    "error": "搜索失败：{{error}}",
+    "empty": "暂无结果"
+  },
+  "preview": {
+    "empty": "单击文件预览内容",
+    "loading": "（预览内容加载中）"
+  },
+  "onboarding": {
+    "title": "欢迎使用 DocMind",
+    "selectFolder": "选择文件夹",
+    "selectFolderDesc": "点击选择要索引的文件夹",
+    "startIndex": "开始索引",
+    "indexing": "索引中",
+    "done": "完成",
+    "pickFolderBtn": "选择文件夹",
+    "startIndexBtn": "开始索引",
+    "startBtn": "开始使用"
+  },
+  "tray": {
+    "show": "显示 DocMind",
+    "quit": "退出"
+  },
+  "settings": {
+    "title": "设置"
+  }
+}

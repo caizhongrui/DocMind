@@ -1,0 +1,31 @@
+{
+  "search": {
+    "placeholder": "Search file content...",
+    "fulltext": "Fulltext",
+    "filename": "Filename",
+    "error": "Search failed: {{error}}",
+    "empty": "No results"
+  },
+  "preview": {
+    "empty": "Click a file to preview",
+    "loading": "(Loading preview...)"
+  },
+  "onboarding": {
+    "title": "Welcome to DocMind",
+    "selectFolder": "Select Folder",
+    "selectFolderDesc": "Click to select a folder to index",
+    "startIndex": "Start Indexing",
+    "indexing": "Indexing",
+    "done": "Done",
+    "pickFolderBtn": "Select Folder",
+    "startIndexBtn": "Start Indexing",
+    "startBtn": "Get Started"
+  },
+  "tray": {
+    "show": "Show DocMind",
+    "quit": "Quit"
+  },
+  "settings": {
+    "title": "Settings"
+  }
+}
