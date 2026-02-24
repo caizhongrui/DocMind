@@ -3,6 +3,7 @@ mod db;
 mod indexer;
 mod search;
 mod state;
+mod watcher;
 
 use state::AppState;
 use std::sync::Mutex;
@@ -35,6 +36,8 @@ pub fn run() {
                 db: Mutex::new(conn),
                 fts: Mutex::new(fts),
             });
+            let app_handle = app.handle().clone();
+            watcher::start_watcher(app_handle);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
