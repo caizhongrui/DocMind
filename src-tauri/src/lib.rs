@@ -1,8 +1,10 @@
 mod commands;
 mod db;
+mod embedder;
 mod indexer;
 mod search;
 mod state;
+mod vector_index;
 mod watcher;
 
 use state::AppState;
