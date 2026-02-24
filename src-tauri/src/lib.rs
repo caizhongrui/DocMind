@@ -20,6 +20,44 @@ fn ping() -> String {
     "pong from DocMind backend".to_string()
 }
 
+fn build_tray(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::{
+        menu::{Menu, MenuItem},
+        tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    };
+    let show = MenuItem::with_id(app, "show", "显示 DocMind", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+
+    TrayIconBuilder::new()
+        .icon(app.default_window_icon().unwrap().clone())
+        .menu(&menu)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                }
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                ..
+            } = event
+            {
+                let app = tray.app_handle();
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -38,6 +76,9 @@ pub fn run() {
             });
             let app_handle = app.handle().clone();
             watcher::start_watcher(app_handle);
+            if let Err(e) = build_tray(app) {
+                eprintln!("[tray] Failed to build tray: {e}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -47,6 +88,10 @@ pub fn run() {
             commands::index::get_watched_folders,
             commands::index::remove_folder,
             commands::search::search_files,
+            commands::settings::get_setting,
+            commands::settings::set_setting,
+            commands::settings::open_file,
+            commands::settings::reveal_in_finder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
