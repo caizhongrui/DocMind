@@ -1,10 +1,11 @@
 use anyhow::Result;
 use std::path::Path;
-use tantivy::{schema::*, Index, IndexWriter, TantivyDocument};
+use tantivy::{schema::*, Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument};
 
 pub struct FtsIndex {
     pub index: Index,
     pub schema: Schema,
+    pub reader: IndexReader,
     pub field_id: Field,
     pub field_path: Field,
     pub field_name: Field,
@@ -30,9 +31,15 @@ impl FtsIndex {
             Index::create_in_dir(index_dir, schema.clone())?
         };
 
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
+            .try_into()?;
+
         Ok(Self {
             index,
             schema,
+            reader,
             field_id,
             field_path,
             field_name,

@@ -1,7 +1,7 @@
 use crate::state::AppState;
 use anyhow::Result;
 use serde::Serialize;
-use tantivy::{collector::TopDocs, query::QueryParser, schema::Value, ReloadPolicy};
+use tantivy::{collector::TopDocs, query::QueryParser, schema::Value};
 
 #[derive(Serialize, Debug)]
 pub struct SearchResult {
@@ -14,44 +14,32 @@ pub struct SearchResult {
 }
 
 pub fn search_fulltext(query_str: &str, state: &AppState, limit: usize) -> Result<Vec<SearchResult>> {
-    let fts = state.fts.lock().unwrap();
-    let reader = fts
-        .index
-        .reader_builder()
-        .reload_policy(ReloadPolicy::OnCommitWithDelay)
-        .try_into()?;
-    let searcher = reader.searcher();
+    // 在锁范围内只取搜索所需的对象，然后立即释放锁
+    let (searcher, query, field_id, field_path, field_name, field_file_type) = {
+        let fts = state.fts.lock().map_err(|_| anyhow::anyhow!("fts lock poisoned"))?;
+        // 强制重载以感知最新提交（对于写后即搜场景保证可见性）
+        fts.reader.reload()?;
+        let searcher = fts.reader.searcher();
+        let query_parser = QueryParser::for_index(
+            &fts.index,
+            vec![fts.field_name, fts.field_content],
+        );
+        let query = query_parser.parse_query(query_str)?;
+        // Field 是 Copy 类型（u32 的 newtype），可在锁内拷贝后在锁外使用
+        (searcher, query, fts.field_id, fts.field_path, fts.field_name, fts.field_file_type)
+        // MutexGuard 在此 scope 结束时 drop，锁释放
+    };
 
-    let query_parser = QueryParser::for_index(
-        &fts.index,
-        vec![fts.field_name, fts.field_content],
-    );
-    let query = query_parser.parse_query(query_str)?;
-
+    // 锁已释放，在锁外执行实际搜索（Searcher 是线程安全的）
     let top_docs = searcher.search(&query, &TopDocs::with_limit(limit))?;
 
     let mut results = Vec::new();
     for (score, doc_address) in top_docs {
         let doc = searcher.doc::<tantivy::TantivyDocument>(doc_address)?;
-        let file_id = doc
-            .get_first(fts.field_id)
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let path = doc
-            .get_first(fts.field_path)
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let name = doc
-            .get_first(fts.field_name)
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let file_type = doc
-            .get_first(fts.field_file_type)
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        let file_id = doc.get_first(field_id).and_then(|v| v.as_u64()).unwrap_or(0);
+        let path = doc.get_first(field_path).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let name = doc.get_first(field_name).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let file_type = doc.get_first(field_file_type).and_then(|v| v.as_str()).unwrap_or("").to_string();
 
         results.push(SearchResult {
             file_id,
@@ -59,7 +47,7 @@ pub fn search_fulltext(query_str: &str, state: &AppState, limit: usize) -> Resul
             name,
             file_type,
             score,
-            snippet: String::new(), // 后续版本补充高亮
+            snippet: String::new(), // TODO: 后续版本补充 Tantivy SnippetGenerator 高亮
         });
     }
     Ok(results)
@@ -67,7 +55,7 @@ pub fn search_fulltext(query_str: &str, state: &AppState, limit: usize) -> Resul
 
 /// 文件名模糊搜索（SQLite LIKE，不需要 Tantivy）
 pub fn search_filename(query_str: &str, state: &AppState, limit: usize) -> Result<Vec<SearchResult>> {
-    let db = state.db.lock().unwrap();
+    let db = state.db.lock().map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
     // 对 LIKE 特殊字符转义
     let escaped = query_str
         .replace('\\', "\\\\")
@@ -77,7 +65,7 @@ pub fn search_filename(query_str: &str, state: &AppState, limit: usize) -> Resul
     let mut stmt = db.prepare(
         "SELECT id, path, file_type FROM files WHERE path LIKE ?1 ESCAPE '\\' LIMIT ?2",
     )?;
-    let results = stmt
+    let results: Result<Vec<SearchResult>, _> = stmt
         .query_map(rusqlite::params![pattern, limit as i64], |r| {
             let path: String = r.get(1)?;
             let name = std::path::Path::new(&path)
@@ -94,9 +82,8 @@ pub fn search_filename(query_str: &str, state: &AppState, limit: usize) -> Resul
                 snippet: String::new(),
             })
         })?
-        .flatten()
         .collect();
-    Ok(results)
+    Ok(results?)
 }
 
 #[cfg(test)]
