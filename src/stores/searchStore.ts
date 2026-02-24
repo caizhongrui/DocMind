@@ -16,6 +16,7 @@ interface SearchStore {
   results: SearchResult[];
   selected: SearchResult | null;
   loading: boolean;
+  error: string | null;
   setQuery: (q: string) => void;
   setMode: (m: "filename" | "fulltext") => void;
   setSelected: (r: SearchResult | null) => void;
@@ -28,6 +29,7 @@ export const useSearchStore = create<SearchStore>((set, get) => ({
   results: [],
   selected: null,
   loading: false,
+  error: null,
   setQuery: (query) => set({ query }),
   setMode: (mode) => set({ mode }),
   setSelected: (selected) => set({ selected }),
@@ -38,9 +40,10 @@ export const useSearchStore = create<SearchStore>((set, get) => ({
     try {
       // 注意：后端命令名是 search_files，不是 search
       const results = await invoke<SearchResult[]>("search_files", { query, mode });
-      set({ results });
+      set({ results, error: null });
     } catch (e) {
       console.error("Search error:", e);
+      set({ results: [], error: e instanceof Error ? e.message : String(e) });
     } finally {
       set({ loading: false });
     }

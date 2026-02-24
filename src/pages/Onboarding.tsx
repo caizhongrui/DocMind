@@ -10,18 +10,34 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
   const [progress, setProgress] = useState({ done: 0, total: 0, current: "" });
 
   useEffect(() => {
-    const unlisten = listen<{ done: number; total: number; current: string }>(
+    let cancelled = false;
+    let unlistenFn: (() => void) | null = null;
+
+    listen<{ done: number; total: number; current: string }>(
       "index-progress",
-      (e) => setProgress(e.payload)
-    );
+      (e) => {
+        if (!cancelled) setProgress(e.payload);
+      }
+    ).then((f) => {
+      if (cancelled) {
+        f();
+      } else {
+        unlistenFn = f;
+      }
+    });
+
     return () => {
-      unlisten.then((f) => f());
+      cancelled = true;
+      if (unlistenFn) unlistenFn();
     };
   }, []);
 
   const pickFolder = async () => {
     const selected = await open({ directory: true });
-    if (selected) setFolder(selected as string);
+    if (selected) {
+      setFolder(selected as string);
+      setCurrent(1); // 选择后自动推进到"开始索引"步骤
+    }
   };
 
   const startIndex = async () => {
@@ -53,11 +69,6 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
       {current === 0 && (
         <Button type="primary" onClick={pickFolder} style={{ marginTop: 24 }}>
           选择文件夹
-        </Button>
-      )}
-      {current === 0 && folder && (
-        <Button onClick={() => setCurrent(1)} style={{ marginLeft: 8 }}>
-          下一步
         </Button>
       )}
       {current === 1 && (
