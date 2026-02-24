@@ -61,7 +61,49 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
     )
     .await?;
 
+    // 下载完成后热加载 embedder 和 vector_index，无需重启应用
+    reload_ai_components(&app)?;
+
     let _ = app.emit("model-ready", MODEL_VERSION);
+    Ok(())
+}
+
+/// 下载后热加载 embedder + vector_index 到 AppState（阻塞操作，在 spawn_blocking 中运行）
+fn reload_ai_components(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let model_dir = state.model_dir.clone();
+
+    // 加载 Embedder
+    let embedder = crate::embedder::Embedder::load(&model_dir)
+        .map_err(|e| format!("加载模型失败：{e}"))?;
+
+    // 初始化 VectorIndex（data_dir = model_dir/../..）
+    let data_dir = model_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .ok_or("无法推断 data_dir")?;
+    let vi_path = data_dir.join("index").join("vectors.usearch");
+    std::fs::create_dir_all(data_dir.join("index")).map_err(|e| e.to_string())?;
+    let vi = crate::vector_index::VectorIndex::open_or_create(&vi_path, 512)
+        .map_err(|e| format!("初始化向量索引失败：{e}"))?;
+
+    // 写入 AppState（锁顺序：vector_index → embedder）
+    {
+        let mut vi_guard = state
+            .vector_index
+            .lock()
+            .map_err(|_| "vector_index lock poisoned".to_string())?;
+        *vi_guard = Some(vi);
+    }
+    {
+        let mut emb_guard = state
+            .embedder
+            .lock()
+            .map_err(|_| "embedder lock poisoned".to_string())?;
+        *emb_guard = Some(embedder);
+    }
+
+    println!("[embedder] hot-loaded successfully");
     Ok(())
 }
 
