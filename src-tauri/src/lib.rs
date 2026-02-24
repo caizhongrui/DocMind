@@ -61,6 +61,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
@@ -92,6 +93,7 @@ pub fn run() {
             commands::settings::set_setting,
             commands::settings::open_file,
             commands::settings::reveal_in_finder,
+            commands::updater::check_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
