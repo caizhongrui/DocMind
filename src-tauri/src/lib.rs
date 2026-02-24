@@ -74,9 +74,48 @@ pub fn run() {
             let index_dir = data_dir.join("index").join("tantivy");
             let fts = indexer::tantivy_index::FtsIndex::open_or_create(&index_dir)
                 .expect("Failed to init FTS index");
+
+            // Initialize AI components (optional - gracefully degrade if model not available)
+            let model_dir = data_dir.join("models").join("bge-small-zh-v1.5");
+            let embedder = if embedder::Embedder::is_available(&model_dir) {
+                match embedder::Embedder::load(&model_dir) {
+                    Ok(e) => {
+                        println!("[embedder] loaded bge-small-zh-v1.5 from {}", model_dir.display());
+                        Some(e)
+                    }
+                    Err(e) => {
+                        eprintln!("[embedder] failed to load: {e}");
+                        None
+                    }
+                }
+            } else {
+                println!("[embedder] model not found at {}, semantic search disabled", model_dir.display());
+                None
+            };
+
+            let vector_index = if embedder.is_some() {
+                let vi_path = data_dir.join("index").join("vectors.usearch");
+                std::fs::create_dir_all(data_dir.join("index"))?;
+                match vector_index::VectorIndex::open_or_create(&vi_path, 512) {
+                    Ok(vi) => {
+                        println!("[vector_index] opened (size: {})", vi.len());
+                        Some(vi)
+                    }
+                    Err(e) => {
+                        eprintln!("[vector_index] failed to open: {e}");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
             app.manage(AppState {
                 db: Mutex::new(conn),
                 fts: Mutex::new(fts),
+                vector_index: Mutex::new(vector_index),
+                embedder: Mutex::new(embedder),
+                model_dir,
             });
             let app_handle = app.handle().clone();
             watcher::start_watcher(app_handle);
