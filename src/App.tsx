@@ -6,12 +6,14 @@ import SearchBar from "./components/SearchBar";
 import ResultList from "./components/ResultList";
 import PreviewPanel from "./components/PreviewPanel";
 import Onboarding from "./pages/Onboarding";
+import SettingsDrawer from "./components/SettingsDrawer";
 
 const { Header, Content, Sider } = Layout;
 
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [hasFolders, setHasFolders] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     invoke<string[]>("get_watched_folders")
@@ -37,36 +39,39 @@ export default function App() {
   }
 
   return (
-    <Layout style={{ height: "100vh" }}>
-      <Header
-        style={{
-          padding: "0 16px",
-          display: "flex",
-          alignItems: "center",
-          background: "#fff",
-          borderBottom: "1px solid #eee",
-          gap: 8,
-        }}
-      >
-        <SearchBar />
-        <Button
-          type="text"
-          icon={<SettingOutlined />}
-          onClick={() => console.log("open settings")}
-          style={{ flexShrink: 0 }}
-        />
-      </Header>
-      <Layout>
-        <Content style={{ overflow: "auto" }}>
-          <ResultList />
-        </Content>
-        <Sider
-          width={400}
-          style={{ overflow: "auto", borderLeft: "1px solid #eee", background: "#fff" }}
+    <>
+      <Layout style={{ height: "100vh" }}>
+        <Header
+          style={{
+            padding: "0 16px",
+            display: "flex",
+            alignItems: "center",
+            background: "#fff",
+            borderBottom: "1px solid #eee",
+            gap: 8,
+          }}
         >
-          <PreviewPanel />
-        </Sider>
+          <SearchBar />
+          <Button
+            type="text"
+            icon={<SettingOutlined />}
+            onClick={() => setSettingsOpen(true)}
+            style={{ flexShrink: 0 }}
+          />
+        </Header>
+        <Layout>
+          <Content style={{ overflow: "auto" }}>
+            <ResultList />
+          </Content>
+          <Sider
+            width={400}
+            style={{ overflow: "auto", borderLeft: "1px solid #eee", background: "#fff" }}
+          >
+            <PreviewPanel />
+          </Sider>
+        </Layout>
       </Layout>
-    </Layout>
+      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+    </>
   );
 }
