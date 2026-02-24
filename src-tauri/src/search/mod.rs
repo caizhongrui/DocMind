@@ -108,7 +108,13 @@ pub fn search_semantic(query_str: &str, state: &AppState, limit: usize) -> Resul
             .lock()
             .map_err(|_| anyhow::anyhow!("vector_index lock poisoned"))?;
         match vi_guard.as_ref() {
-            Some(vi) => vi.search(&query_embedding, limit)?,
+            Some(vi) => {
+                // USearch 空索引 search 会出错，提前判断
+                if vi.len() == 0 {
+                    return Ok(vec![]);
+                }
+                vi.search(&query_embedding, limit)?
+            }
             None => return Ok(vec![]),
         }
     }; // vi lock released

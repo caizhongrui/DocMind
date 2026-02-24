@@ -15,6 +15,7 @@ interface ModelStatus {
   available: boolean;
   model_dir: string;
   model_version: string;
+  embedding_count: number;
 }
 
 export default function App() {
@@ -23,6 +24,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [modelAvailable, setModelAvailable] = useState(false);
+  const [embeddingCount, setEmbeddingCount] = useState(0);
 
   useEffect(() => {
     Promise.all([
@@ -32,6 +34,7 @@ export default function App() {
       .then(([folders, modelStatus]) => {
         setHasFolders(folders.length > 0);
         setModelAvailable(modelStatus.available);
+        setEmbeddingCount(modelStatus.embedding_count);
       })
       .catch(() => {
         setHasFolders(false);
@@ -77,8 +80,22 @@ export default function App() {
             type="text"
             icon={<RobotOutlined />}
             onClick={() => setModelOpen(true)}
-            style={{ flexShrink: 0, color: modelAvailable ? "#52c41a" : "#bfbfbf" }}
-            title={modelAvailable ? "AI 模型已就绪" : "配置 AI 语义搜索"}
+            style={{
+              flexShrink: 0,
+              color:
+                modelAvailable && embeddingCount > 0
+                  ? "#52c41a"           // 绿色：模型+索引均就绪
+                  : modelAvailable
+                  ? "#faad14"           // 橙色：模型已下载但需重建索引
+                  : "#bfbfbf",          // 灰色：未下载
+            }}
+            title={
+              modelAvailable && embeddingCount > 0
+                ? "AI 语义搜索已就绪"
+                : modelAvailable
+                ? "模型已下载，需重新索引后才能使用语义搜索"
+                : "点击配置 AI 语义搜索"
+            }
           />
           <Button
             type="text"
@@ -115,6 +132,10 @@ export default function App() {
         <ModelManager
           onModelReady={() => {
             setModelAvailable(true);
+            // 重建后刷新 embedding_count
+            invoke<ModelStatus>("get_model_status")
+              .then((s) => setEmbeddingCount(s.embedding_count))
+              .catch(() => {});
             setModelOpen(false);
           }}
         />

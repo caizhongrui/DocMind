@@ -1,4 +1,4 @@
-import { Input, Radio, Tooltip, message } from "antd";
+import { Input, Segmented, Tooltip, message } from "antd";
 import { RobotOutlined } from "@ant-design/icons";
 import { useSearchStore } from "../stores/searchStore";
 
@@ -13,29 +13,49 @@ export default function SearchBar({ modelAvailable }: { modelAvailable: boolean 
     }
   };
 
+  const semanticLabel = (
+    <Tooltip
+      title={
+        modelAvailable
+          ? "AI 语义搜索，理解自然语言含义"
+          : "需先下载 AI 模型（点击顶栏 🤖 按钮）"
+      }
+    >
+      <span style={{ opacity: modelAvailable ? 1 : 0.4, cursor: modelAvailable ? "pointer" : "not-allowed" }}>
+        <RobotOutlined /> 语义
+      </span>
+    </Tooltip>
+  );
+
   return (
-    <div style={{ display: "flex", gap: 8, flex: 1 }}>
+    <div style={{ display: "flex", gap: 8, flex: 1, alignItems: "center" }}>
       <Input.Search
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onSearch={handleSearch}
-        placeholder={mode === "semantic" ? "语义搜索（自然语言描述）..." : "搜索文件内容..."}
+        placeholder={
+          mode === "semantic"
+            ? "用自然语言描述要找的内容..."
+            : mode === "filename"
+            ? "按文件名搜索..."
+            : "搜索文件内容..."
+        }
         allowClear
         style={{ flex: 1 }}
       />
-      <Radio.Group value={mode} onChange={(e) => setMode(e.target.value)} size="small">
-        <Radio.Button value="fulltext">全文</Radio.Button>
-        <Radio.Button value="filename">文件名</Radio.Button>
-        <Tooltip title={modelAvailable ? "语义搜索（AI）" : "语义搜索不可用，请先下载模型"}>
-          <Radio.Button
-            value="semantic"
-            disabled={!modelAvailable}
-            style={modelAvailable ? { color: "#1677ff" } : {}}
-          >
-            <RobotOutlined /> 语义
-          </Radio.Button>
-        </Tooltip>
-      </Radio.Group>
+      <Segmented
+        value={mode}
+        onChange={(val) => {
+          if (val === "semantic" && !modelAvailable) return;
+          setMode(val as "filename" | "fulltext" | "semantic");
+        }}
+        options={[
+          { label: "全文", value: "fulltext" },
+          { label: "文件名", value: "filename" },
+          { label: semanticLabel, value: "semantic", disabled: !modelAvailable },
+        ]}
+        size="small"
+      />
     </div>
   );
 }

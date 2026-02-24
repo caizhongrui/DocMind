@@ -15,15 +15,30 @@ pub struct ModelStatus {
     pub available: bool,
     pub model_dir: String,
     pub model_version: String,
+    pub embedding_count: i64, // 已生成的 embedding 数量（0 = 需要重新索引）
 }
 
 #[tauri::command]
 pub fn get_model_status(state: State<'_, AppState>) -> ModelStatus {
     let available = crate::embedder::Embedder::is_available(&state.model_dir);
+    let embedding_count = if available {
+        state
+            .db
+            .lock()
+            .ok()
+            .and_then(|db| {
+                db.query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0))
+                    .ok()
+            })
+            .unwrap_or(0)
+    } else {
+        0
+    };
     ModelStatus {
         available,
         model_dir: state.model_dir.to_string_lossy().to_string(),
         model_version: MODEL_VERSION.to_string(),
+        embedding_count,
     }
 }
 

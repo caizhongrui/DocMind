@@ -250,7 +250,7 @@ Windows：%APPDATA%\DocMind\
 | **向量原始存储** | SQLite（BLOB） | 独立文件 | 统一存储，数据一致性有保障；USearch 文件损坏时可从此重建 |
 | **OCR** | PaddleOCR（子进程） | Tesseract | 中文精度高、支持复杂版式 |
 | **LLM推理** | `llama.cpp` 绑定 | Ollama | 直接嵌入，无额外进程，更轻量 |
-| **ONNX 推理** | `onnxruntime-sys` | `tract` | 微软官方 ONNX Runtime Rust 绑定，Windows/macOS/Linux 全支持；tract 对 bge 系列复杂算子兼容性不足 |
+| **ONNX 推理** | `ort 2.x`（`ort = "2.0.0-rc.11"`） | `tract` | onnxruntime 官方 Rust 封装，支持 `download-binaries` feature 自动下载预编译库，Apple Silicon 验证通过；注意需写完整版本号，`ort = "2"` 不自动选预发布版 |
 | **嵌入模型（V2.0）** | `bge-small-zh-v1.5`（ONNX，33MB） | `bge-m3` | 中文及中英混合优化；英文文档语义退化由 Tantivy 全文检索兜底；V3.0 升级为 `bge-m3`（570MB，100语言） |
 | **模型管理** | 自研Rust模块 | 无 | 完全掌控下载/切换逻辑 |
 

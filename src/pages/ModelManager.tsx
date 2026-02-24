@@ -20,6 +20,7 @@ interface ModelStatus {
   available: boolean;
   model_dir: string;
   model_version: string;
+  embedding_count: number;
 }
 
 interface DownloadProgress {
@@ -136,6 +137,15 @@ export default function ModelManager({
                 <Tag color="default">未下载</Tag>
               )}
             </Descriptions.Item>
+            {status.available && (
+              <Descriptions.Item label="已索引文本块">
+                {status.embedding_count > 0 ? (
+                  <Tag color="success">{status.embedding_count.toLocaleString()} 块</Tag>
+                ) : (
+                  <Tag color="warning">0 块（需要重新索引）</Tag>
+                )}
+              </Descriptions.Item>
+            )}
             <Descriptions.Item label="存储路径">
               <Typography.Text
                 copyable
@@ -196,11 +206,26 @@ export default function ModelManager({
           </Button>
         )}
 
-        {status?.available && (
+        {status?.available && status.embedding_count === 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message="模型已就绪，但还没有语义索引"
+            description={
+              <>
+                需要重新索引文档才能使用语义搜索。请到
+                <strong>「设置」→ 选择文件夹 → 删除后重新添加</strong>，
+                索引过程中会自动生成语义向量。
+              </>
+            }
+          />
+        )}
+        {status?.available && status.embedding_count > 0 && (
           <Alert
             type="success"
             showIcon
-            message="模型已就绪！回到主界面，搜索栏选择「语义」模式即可使用 AI 语义搜索。"
+            message={`模型已就绪，已索引 ${status.embedding_count.toLocaleString()} 个文本块`}
+            description="回到主界面，搜索栏选择「语义」模式即可使用 AI 语义搜索。"
           />
         )}
       </Space>
