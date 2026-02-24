@@ -1,3 +1,4 @@
+mod commands;
 mod db;
 mod indexer;
 mod state;
@@ -26,10 +27,22 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
             let conn = db::init(&data_dir.join("docmind.db"))
                 .expect("Failed to init database");
-            app.manage(AppState { db: Mutex::new(conn) });
+            let index_dir = data_dir.join("index").join("tantivy");
+            let fts = indexer::tantivy_index::FtsIndex::open_or_create(&index_dir)
+                .expect("Failed to init FTS index");
+            app.manage(AppState {
+                db: Mutex::new(conn),
+                fts: Mutex::new(fts),
+            });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, ping])
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            ping,
+            commands::index::start_index,
+            commands::index::get_watched_folders,
+            commands::index::remove_folder,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
