@@ -1,0 +1,111 @@
+use crate::state::AppState;
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager, State};
+
+const MODEL_VERSION: &str = "bge-small-zh-v1.5";
+
+// 模型文件下载地址（Xenova/bge-small-zh-v1.5 ONNX 格式）
+const MODEL_ONNX_URL: &str =
+    "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model.onnx";
+const TOKENIZER_URL: &str =
+    "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/tokenizer.json";
+
+#[derive(Serialize, Clone)]
+pub struct ModelStatus {
+    pub available: bool,
+    pub model_dir: String,
+    pub model_version: String,
+}
+
+#[tauri::command]
+pub fn get_model_status(state: State<'_, AppState>) -> ModelStatus {
+    let available = crate::embedder::Embedder::is_available(&state.model_dir);
+    ModelStatus {
+        available,
+        model_dir: state.model_dir.to_string_lossy().to_string(),
+        model_version: MODEL_VERSION.to_string(),
+    }
+}
+
+#[tauri::command]
+pub async fn download_model(app: AppHandle) -> Result<(), String> {
+    let model_dir = {
+        let state = app.state::<AppState>();
+        state.model_dir.clone()
+    };
+
+    std::fs::create_dir_all(&model_dir).map_err(|e| e.to_string())?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // 先下载 tokenizer.json（小文件）
+    download_file(
+        &client,
+        TOKENIZER_URL,
+        &model_dir.join("tokenizer.json"),
+        &app,
+        "tokenizer.json",
+    )
+    .await?;
+
+    // 再下载 model.onnx（大文件，~100MB）
+    download_file(
+        &client,
+        MODEL_ONNX_URL,
+        &model_dir.join("model.onnx"),
+        &app,
+        "model.onnx",
+    )
+    .await?;
+
+    let _ = app.emit("model-ready", MODEL_VERSION);
+    Ok(())
+}
+
+async fn download_file(
+    client: &reqwest::Client,
+    url: &str,
+    dest: &std::path::Path,
+    app: &AppHandle,
+    filename: &str,
+) -> Result<(), String> {
+    use std::io::Write;
+
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("request error: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {} for {url}", resp.status()));
+    }
+
+    let total = resp.content_length().unwrap_or(0);
+    let mut downloaded: u64 = 0;
+    let mut file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
+
+    let mut response = resp;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| format!("download error: {e}"))?
+    {
+        file.write_all(&chunk).map_err(|e| e.to_string())?;
+        downloaded += chunk.len() as u64;
+        let _ = app.emit(
+            "model-download-progress",
+            serde_json::json!({
+                "file": filename,
+                "done": downloaded,
+                "total": total,
+            }),
+        );
+    }
+
+    file.flush().map_err(|e| e.to_string())?;
+    Ok(())
+}

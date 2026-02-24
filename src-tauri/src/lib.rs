@@ -137,6 +137,8 @@ pub fn run() {
             commands::settings::reveal_in_finder,
             commands::settings::read_file_preview,
             commands::updater::check_update,
+            commands::model::get_model_status,
+            commands::model::download_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

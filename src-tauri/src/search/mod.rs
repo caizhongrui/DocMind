@@ -86,6 +86,83 @@ pub fn search_filename(query_str: &str, state: &AppState, limit: usize) -> Resul
     Ok(results?)
 }
 
+/// 语义搜索（基于 embedding 向量相似度）
+/// 若 embedder 或 vector_index 不可用，返回空结果（优雅降级）
+pub fn search_semantic(query_str: &str, state: &AppState, limit: usize) -> Result<Vec<SearchResult>> {
+    // Step 1: 生成查询 embedding（持有 embedder 锁，尽快释放）
+    let query_embedding = {
+        let mut embedder_guard = state
+            .embedder
+            .lock()
+            .map_err(|_| anyhow::anyhow!("embedder lock poisoned"))?;
+        match embedder_guard.as_mut() {
+            Some(embedder) => embedder.embed(query_str)?,
+            None => return Ok(vec![]), // 模型未加载，返回空
+        }
+    }; // embedder lock released
+
+    // Step 2: 向量搜索（持有 vector_index 锁，尽快释放）
+    let chunk_scores: Vec<(u64, f32)> = {
+        let vi_guard = state
+            .vector_index
+            .lock()
+            .map_err(|_| anyhow::anyhow!("vector_index lock poisoned"))?;
+        match vi_guard.as_ref() {
+            Some(vi) => vi.search(&query_embedding, limit)?,
+            None => return Ok(vec![]),
+        }
+    }; // vi lock released
+
+    if chunk_scores.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Step 3: 从 SQLite 取 chunk + 文件信息
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+
+    let mut results = Vec::new();
+    for (chunk_id, score) in &chunk_scores {
+        let row = db.query_row(
+            "SELECT c.content, f.id, f.path, f.file_type
+             FROM chunks c JOIN files f ON c.file_id = f.id
+             WHERE c.id = ?1",
+            rusqlite::params![*chunk_id as i64],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
+            },
+        );
+        if let Ok((content, file_id, path, file_type)) = row {
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let snippet = if content.chars().count() > 200 {
+                format!("{}...", content.chars().take(200).collect::<String>())
+            } else {
+                content
+            };
+            results.push(SearchResult {
+                file_id: file_id as u64,
+                path,
+                name,
+                file_type,
+                score: *score,
+                snippet,
+            });
+        }
+    }
+    Ok(results)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,6 +179,9 @@ mod tests {
         AppState {
             db: Mutex::new(conn),
             fts: Mutex::new(fts),
+            vector_index: Mutex::new(None),
+            embedder: Mutex::new(None),
+            model_dir: tmp.path().join("models"),
         }
     }
 
