@@ -62,3 +62,25 @@ pub fn reveal_in_finder(path: String) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[tauri::command]
+pub fn read_file_preview(path: String) -> Result<String, String> {
+    use crate::indexer::parser::parse_file;
+    use std::path::Path;
+
+    let result = parse_file(Path::new(&path));
+
+    // 安全截取 UTF-8 字符串前 3000 个字符（不是字节）
+    let chars: String = result.content.chars().take(3000).collect();
+    let preview = if result.content.chars().count() > 3000 {
+        format!("{}\n\n...(内容已截断，共 {} 字符)", chars, result.content.chars().count())
+    } else {
+        chars
+    };
+
+    if preview.is_empty() {
+        Err("无法读取文件内容".to_string())
+    } else {
+        Ok(preview)
+    }
+}

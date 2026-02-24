@@ -93,6 +93,7 @@ pub fn run() {
             commands::settings::set_setting,
             commands::settings::open_file,
             commands::settings::reveal_in_finder,
+            commands::settings::read_file_preview,
             commands::updater::check_update,
         ])
         .run(tauri::generate_context!())
