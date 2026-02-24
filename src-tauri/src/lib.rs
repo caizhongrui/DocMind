@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod indexer;
+mod search;
 mod state;
 
 use state::AppState;
@@ -42,6 +43,7 @@ pub fn run() {
             commands::index::start_index,
             commands::index::get_watched_folders,
             commands::index::remove_folder,
+            commands::search::search_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
