@@ -16,6 +16,13 @@ i18n
     interpolation: {
       escapeValue: false,
     },
+    detection: {
+      order: ["localStorage", "navigator"],
+      caches: ["localStorage"],
+    },
+  })
+  .catch((err: unknown) => {
+    console.error("[i18n] initialization failed:", err);
   });
 
 export default i18n;
