@@ -2,7 +2,7 @@ use crate::state::AppState;
 use tauri::{AppHandle, State};
 
 #[tauri::command]
-pub async fn start_index(
+pub fn start_index(
     folder: String,
     state: State<'_, AppState>,
     app: AppHandle,
@@ -40,12 +40,19 @@ pub fn remove_folder(folder: String, state: State<'_, AppState>) -> Result<(), S
     let db = state.db.lock().unwrap();
     let fts = state.fts.lock().unwrap();
 
-    // 1. 先查询要删除的文件 ID
+    // 转义 LIKE 特殊字符
+    let escaped = folder
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    let like_pattern = format!("{}%", escaped);
+
+    // 1. 查询要删除的文件 ID
     let mut stmt = db
-        .prepare("SELECT id FROM files WHERE path LIKE ?1")
+        .prepare("SELECT id FROM files WHERE path LIKE ?1 ESCAPE '\\'")
         .map_err(|e| e.to_string())?;
     let file_ids: Vec<i64> = stmt
-        .query_map([format!("{}%", folder)], |r| r.get(0))
+        .query_map([&like_pattern], |r| r.get(0))
         .map_err(|e| e.to_string())?
         .flatten()
         .collect();
@@ -64,8 +71,8 @@ pub fn remove_folder(folder: String, state: State<'_, AppState>) -> Result<(), S
     db.execute("DELETE FROM watched_folders WHERE path = ?1", [&folder])
         .map_err(|e| e.to_string())?;
     db.execute(
-        "DELETE FROM files WHERE path LIKE ?1",
-        [format!("{}%", folder)],
+        "DELETE FROM files WHERE path LIKE ?1 ESCAPE '\\'",
+        [&like_pattern],
     )
     .map_err(|e| e.to_string())?;
 

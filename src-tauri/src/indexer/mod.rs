@@ -55,15 +55,28 @@ pub fn scan_and_index(folder: &Path, state: &AppState, app: &AppHandle) -> Resul
             .as_secs() as i64;
 
         // 检查是否已索引且未修改
-        let existing: Option<i64> = db
+        let existing_modified: Option<i64> = db
             .query_row(
                 "SELECT modified FROM files WHERE path = ?1",
                 [path.to_string_lossy().as_ref()],
                 |r| r.get(0),
             )
             .ok();
-        if existing == Some(modified) {
+        if existing_modified == Some(modified) {
             continue;
+        }
+
+        // 如果文件之前已索引（现在被修改了），先从 Tantivy 删除旧文档
+        let old_file_id: Option<i64> = db
+            .query_row(
+                "SELECT id FROM files WHERE path = ?1",
+                [path.to_string_lossy().as_ref()],
+                |r| r.get(0),
+            )
+            .ok();
+        if let Some(old_id) = old_file_id {
+            fts.delete_document(&writer, old_id as u64)
+                .map_err(|e| anyhow::anyhow!(e))?;
         }
 
         let parsed = parse_file(path);
