@@ -1,4 +1,5 @@
 mod db;
+mod indexer;
 mod state;
 
 use state::AppState;

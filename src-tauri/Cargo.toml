@@ -25,6 +25,12 @@ serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
+encoding_rs = "0.8"
+lopdf = "0.32"
+pdf-extract = "0.7"
+calamine = { version = "0.24", features = ["dates"] }
+zip = "2"
+quick-xml = "0.36"
 
 [dev-dependencies]
 tempfile = "3"
