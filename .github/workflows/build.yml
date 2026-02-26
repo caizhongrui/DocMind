@@ -40,6 +40,9 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # llama.cpp 使用 std::filesystem，需要 macOS 10.15+
+          # 此变量传递给 llama-cpp-sys-2 的 cmake 构建，设置 -mmacosx-version-min
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
