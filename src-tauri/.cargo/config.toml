@@ -1,0 +1,10 @@
+# Windows MSVC：强制使用动态 CRT（/MD）
+#
+# 背景：ort_sys（ONNX Runtime 预编译二进制）使用 /MD（动态 CRT），
+#        而 esaxx_rs（tantivy 依赖）的 cc crate 默认使用 /MT（静态 CRT）。
+#        两者混用会导致 LNK2038 / LNK2005 链接错误。
+#
+# 修复：禁用 crt-static，让 Rust 及所有通过 cc crate 编译的 C/C++ 代码
+#        统一使用 /MD（动态 CRT），与 ONNX Runtime 预编译库保持一致。
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=-crt-static"]
