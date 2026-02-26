@@ -1,31 +1,66 @@
 {
   "search": {
-    "placeholder": "搜索文件内容...",
+    "placeholder_fulltext": "搜索文件内容、关键词...",
+    "placeholder_filename": "按文件名搜索...",
+    "placeholder_semantic": "用自然语言描述要找的内容...",
     "fulltext": "全文",
     "filename": "文件名",
+    "semantic": "语义",
     "error": "搜索失败：{{error}}",
-    "empty": "暂无结果"
+    "empty_query": "开始搜索文件",
+    "empty_query_desc": "输入关键词搜索文件内容、文件名",
+    "no_results": "未找到相关文件",
+    "no_results_desc": "没有找到与\"{{query}}\"匹配的内容",
+    "sort_relevance": "相关度",
+    "sort_modified": "修改时间",
+    "sort_size": "文件大小",
+    "export_csv": "导出 CSV",
+    "batch_mode": "批量操作",
+    "batch_selected": "已选 {{count}} 个文件",
+    "batch_select_all": "全选",
+    "batch_cancel": "取消",
+    "batch_export": "导出选中",
+    "batch_open": "批量打开",
+    "batch_summarize": "生成摘要"
   },
   "preview": {
     "empty": "单击文件预览内容",
-    "loading": "（预览内容加载中）"
-  },
-  "onboarding": {
-    "title": "欢迎使用 DocMind",
-    "selectFolder": "选择文件夹",
-    "selectFolderDesc": "点击选择要索引的文件夹",
-    "startIndex": "开始索引",
-    "indexing": "索引中",
-    "done": "完成",
-    "pickFolderBtn": "选择文件夹",
-    "startIndexBtn": "开始索引",
-    "startBtn": "开始使用"
-  },
-  "tray": {
-    "show": "显示 DocMind",
-    "quit": "退出"
+    "loading": "预览内容加载中"
   },
   "settings": {
-    "title": "设置"
+    "title": "设置",
+    "folders": "已监听的文件夹",
+    "add_folder": "添加文件夹",
+    "reindex": "重新索引",
+    "remove": "移除",
+    "semantic_index": "语义索引",
+    "rebuild_vector": "重建语义索引",
+    "appearance": "外观",
+    "theme_system": "跟随系统",
+    "theme_light": "浅色",
+    "theme_dark": "深色",
+    "language": "语言",
+    "shortcut": "全局快捷键",
+    "reindex_interval": "定时重索引",
+    "reindex_interval_desc": "自动定期重新扫描并更新文件索引。0 分钟 = 禁用。",
+    "api_config": "在线 API（OpenAI 兼容）",
+    "data_management": "数据管理",
+    "clear_all": "清除所有索引"
+  },
+  "qa": {
+    "new_conversation": "新对话",
+    "send": "发送",
+    "stop": "停止",
+    "clear": "清空",
+    "export": "导出对话",
+    "placeholder_loaded": "输入问题… (Enter 发送，Shift+Enter 换行)",
+    "placeholder_no_model": "请先加载模型"
+  },
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "loading": "加载中…",
+    "success": "成功",
+    "error": "错误"
   }
 }

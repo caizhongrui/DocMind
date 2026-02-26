@@ -13,7 +13,9 @@ pub struct Embedder {
 impl Embedder {
     /// 从指定目录加载模型。model_dir 需含 model.onnx 和 tokenizer.json
     pub fn load(model_dir: &Path) -> Result<Self> {
+        // 限制 ONNX 推理线程数为 2，避免后台索引抢占全部 CPU 核心
         let session = Session::builder()?
+            .with_intra_threads(2)?
             .commit_from_file(model_dir.join("model.onnx"))?;
         let tokenizer =
             Tokenizer::from_file(model_dir.join("tokenizer.json"))
@@ -80,18 +82,19 @@ pub fn normalize(v: &[f32]) -> Vec<f32> {
     v.iter().map(|x| x / norm).collect()
 }
 
-/// 将长文本分成若干 chunk，每 chunk 约 400 字符
+/// 将长文本分成若干 chunk，每 chunk 约 chunk_size 字符，相邻 chunk 有 overlap 重叠
 pub fn chunk_text(text: &str, chunk_size: usize) -> Vec<String> {
-    if text.len() <= chunk_size {
-        return vec![text.to_string()];
+    const OVERLAP: usize = 150; // 增大 overlap，减少知识点被截断
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= chunk_size {
+        return vec![chars.iter().collect()];
     }
     let mut chunks = Vec::new();
-    let chars: Vec<char> = text.chars().collect();
     let mut start = 0;
     while start < chars.len() {
         let end = (start + chunk_size).min(chars.len());
         chunks.push(chars[start..end].iter().collect());
-        start += chunk_size.saturating_sub(50); // 50 char overlap
+        start += chunk_size.saturating_sub(OVERLAP);
     }
     chunks
 }

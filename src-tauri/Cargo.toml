@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
@@ -34,13 +35,25 @@ calamine = { version = "0.24", features = ["dates"] }
 zip = "2"
 quick-xml = "0.36"
 tantivy = "0.22"
-notify = { version = "6", features = ["macos_fsevent"] }
 ort = { version = "2.0.0-rc.11", features = ["download-binaries"] }
 tokenizers = "0.19"
 ndarray = "0.15"
 usearch = "2"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 tokio = { version = "1", features = ["rt-multi-thread"] }
+futures-util = "0.3"
+tokio-util = { version = "0.7", features = ["io", "codec"] }
+base64 = "0.22"
+
+# macOS：fsevent 文件监听优化 + Metal GPU 加速
+[target.'cfg(target_os = "macos")'.dependencies]
+notify = { version = "6", features = ["macos_fsevent"] }
+llama-cpp-2 = { version = "0.1", features = ["metal"] }
+
+# Windows / Linux：polling 文件监听 + CPU 推理
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+notify = "6"
+llama-cpp-2 = "0.1"
 
 [dev-dependencies]
 tempfile = "3"

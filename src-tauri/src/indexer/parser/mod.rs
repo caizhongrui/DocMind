@@ -1,3 +1,4 @@
+pub mod archive;
 pub mod office;
 pub mod pdf;
 pub mod text;
@@ -35,6 +36,8 @@ pub fn parse_file(path: &Path) -> ParseResult {
         "pdf" => pdf::parse(path),
         "docx" | "pptx" => office::parse_xml(path),
         "xlsx" => office::parse_xlsx(path),
+        "doc" => office::parse_doc(path),
+        "zip" => archive::parse_zip(path),
         _ => ParseResult::failed(),
     }
 }

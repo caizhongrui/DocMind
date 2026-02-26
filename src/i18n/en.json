@@ -1,31 +1,66 @@
 {
   "search": {
-    "placeholder": "Search file content...",
-    "fulltext": "Fulltext",
+    "placeholder_fulltext": "Search file content, keywords...",
+    "placeholder_filename": "Search by filename...",
+    "placeholder_semantic": "Describe what you're looking for...",
+    "fulltext": "Full Text",
     "filename": "Filename",
+    "semantic": "Semantic",
     "error": "Search failed: {{error}}",
-    "empty": "No results"
+    "empty_query": "Start searching",
+    "empty_query_desc": "Enter keywords to search file content or filenames",
+    "no_results": "No matching files",
+    "no_results_desc": "No results found for \"{{query}}\"",
+    "sort_relevance": "Relevance",
+    "sort_modified": "Modified",
+    "sort_size": "File size",
+    "export_csv": "Export CSV",
+    "batch_mode": "Batch",
+    "batch_selected": "{{count}} selected",
+    "batch_select_all": "Select all",
+    "batch_cancel": "Cancel",
+    "batch_export": "Export selected",
+    "batch_open": "Open all",
+    "batch_summarize": "Summarize"
   },
   "preview": {
     "empty": "Click a file to preview",
-    "loading": "(Loading preview...)"
-  },
-  "onboarding": {
-    "title": "Welcome to DocMind",
-    "selectFolder": "Select Folder",
-    "selectFolderDesc": "Click to select a folder to index",
-    "startIndex": "Start Indexing",
-    "indexing": "Indexing",
-    "done": "Done",
-    "pickFolderBtn": "Select Folder",
-    "startIndexBtn": "Start Indexing",
-    "startBtn": "Get Started"
-  },
-  "tray": {
-    "show": "Show DocMind",
-    "quit": "Quit"
+    "loading": "Loading preview"
   },
   "settings": {
-    "title": "Settings"
+    "title": "Settings",
+    "folders": "Watched Folders",
+    "add_folder": "Add Folder",
+    "reindex": "Re-index",
+    "remove": "Remove",
+    "semantic_index": "Semantic Index",
+    "rebuild_vector": "Rebuild Semantic Index",
+    "appearance": "Appearance",
+    "theme_system": "System",
+    "theme_light": "Light",
+    "theme_dark": "Dark",
+    "language": "Language",
+    "shortcut": "Global Shortcut",
+    "reindex_interval": "Scheduled Re-index",
+    "reindex_interval_desc": "Automatically re-scan and update the index periodically. 0 = disabled.",
+    "api_config": "Online API (OpenAI-compatible)",
+    "data_management": "Data Management",
+    "clear_all": "Clear all index"
+  },
+  "qa": {
+    "new_conversation": "New Chat",
+    "send": "Send",
+    "stop": "Stop",
+    "clear": "Clear",
+    "export": "Export",
+    "placeholder_loaded": "Ask a question… (Enter to send, Shift+Enter for newline)",
+    "placeholder_no_model": "Please load a model first"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "loading": "Loading…",
+    "success": "Success",
+    "error": "Error"
   }
 }

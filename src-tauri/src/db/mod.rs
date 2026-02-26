@@ -21,15 +21,16 @@ fn run_migrations(conn: &Connection) -> Result<()> {
             [],
             |r| r.get(0),
         )
-        .unwrap_or(0);
+        ?;
 
     for (i, migration) in migrations::MIGRATIONS.iter().enumerate() {
         if (i as i64) >= version {
-            conn.execute_batch(migration)?;
-            conn.execute(
-                "INSERT INTO schema_version VALUES (?1)",
-                rusqlite::params![i as i64 + 1],
-            )?;
+            let tx_sql = format!(
+                "BEGIN;\n{}\nINSERT INTO schema_version VALUES ({});\nCOMMIT;",
+                migration,
+                i as i64 + 1
+            );
+            conn.execute_batch(&tx_sql)?;
         }
     }
     Ok(())

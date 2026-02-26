@@ -34,7 +34,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "PLACEHOLDER_UPDATE_PUBKEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU1RjBDOEZENDczNzBFMzYKUldRMkRqZEgvY2p3NWY5aHMxcVVFWlNJS2NUbXVNcXFKUFErS3FUR0ViaVEvRjhUVUhiSlg4N00K",
       "endpoints": ["https://update.docmind.app/latest.json"],
       "dialog": false
     }
