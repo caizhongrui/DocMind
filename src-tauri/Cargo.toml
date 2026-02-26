@@ -49,10 +49,9 @@ base64 = "0.22"
 notify = { version = "6", features = ["macos_fsevent"] }
 llama-cpp-2 = { version = "0.1", features = ["metal"] }
 
-# Windows / Linux：polling 文件监听 + CPU 推理
+# Windows / Linux：polling 文件监听（不含本地 LLM，使用 API 模式）
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 notify = "6"
-llama-cpp-2 = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
