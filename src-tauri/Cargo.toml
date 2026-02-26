@@ -35,23 +35,24 @@ calamine = { version = "0.24", features = ["dates"] }
 zip = "2"
 quick-xml = "0.36"
 tantivy = "0.22"
+ort = { version = "2.0.0-rc.11", features = ["download-binaries"] }
+tokenizers = "0.19"
+ndarray = "0.15"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 futures-util = "0.3"
 tokio-util = { version = "0.7", features = ["io", "codec"] }
 base64 = "0.22"
 
-# macOS：fsevent 文件监听优化 + Metal GPU 加速 + ONNX 语义搜索
+# macOS：fsevent 文件监听 + Metal GPU 加速（llama.cpp + ONNX）
 [target.'cfg(target_os = "macos")'.dependencies]
 notify = { version = "6", features = ["macos_fsevent"] }
 llama-cpp-2 = { version = "0.1", features = ["metal"] }
-ort = { version = "2.0.0-rc.11", features = ["download-binaries"] }
-tokenizers = "0.19"
-ndarray = "0.15"
 
-# Windows / Linux：polling 文件监听（不含本地 LLM，使用 API 模式）
+# Windows / Linux：polling 文件监听 + CPU 推理（llama.cpp CPU-only）
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 notify = "6"
+llama-cpp-2 = { version = "0.1" }
 
 [dev-dependencies]
 tempfile = "3"

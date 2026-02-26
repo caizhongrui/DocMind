@@ -68,6 +68,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # 包含 .cargo/config.toml 哈希，确保 CRT 标志变化时缓存失效
+          key: ${{ hashFiles('src-tauri/.cargo/config.toml') }}
 
       - name: Install frontend dependencies
         run: npm ci
@@ -77,6 +79,11 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          # 强制所有通过 cc crate 编译的 C/C++ 代码使用动态 CRT (/MD)
+          # 与 ort_sys (ONNX Runtime) 和 llama_cpp_sys_2 预编译库保持一致
+          # CFLAGS/CXXFLAGS 追加在编译命令末尾，/MD 会覆盖 cc crate 默认的 /MT
+          CFLAGS: /MD
+          CXXFLAGS: /MD
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
