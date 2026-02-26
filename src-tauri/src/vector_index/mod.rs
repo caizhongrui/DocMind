@@ -1,87 +1,165 @@
 use anyhow::Result;
+use std::collections::HashMap;
 use std::path::Path;
-use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
+use std::sync::RwLock;
 
+/// 纯 Rust 向量索引（替代 usearch，跨平台无 C++ 依赖）
+///
+/// 采用暴力余弦距离搜索。对于桌面端文档搜索场景（< 100k 向量，384 维），
+/// 单次查询耗时 < 100ms，完全可接受。
 pub struct VectorIndex {
-    index: Index,
+    vectors: RwLock<HashMap<u64, Vec<f32>>>,
     path: std::path::PathBuf,
     dimensions: usize,
 }
 
 impl VectorIndex {
     pub fn open_or_create(index_path: &Path, dimensions: usize) -> Result<Self> {
-        let mut options = IndexOptions::default();
-        options.dimensions = dimensions;
-        options.metric = MetricKind::Cos;
-        options.quantization = ScalarKind::F16;
-
-        let index = Index::new(&options)?;
-
-        if index_path.exists() {
-            match index.load(index_path.to_str().unwrap()) {
-                Ok(()) => {
-                    // load 后必须额外 reserve，否则 add 时内部扩容触发 null ptr crash
-                    let sz = index.size();
-                    index.reserve(sz + 100_000)?;
-                }
+        let vectors = if index_path.exists() {
+            match Self::load_from_file(index_path) {
+                Ok(m) => m,
                 Err(e) => {
-                    // 文件损坏（如上次 crash 留下的残留文件），删掉重建
+                    // 文件损坏（如旧格式 usearch 文件）或读取失败，删掉重建
                     eprintln!("[vector_index] corrupted index file, recreating: {e}");
                     let _ = std::fs::remove_file(index_path);
-                    index.reserve(100_000)?;
+                    HashMap::new()
                 }
             }
         } else {
-            index.reserve(100_000)?;
-        }
+            HashMap::new()
+        };
 
         Ok(Self {
-            index,
+            vectors: RwLock::new(vectors),
             path: index_path.to_path_buf(),
             dimensions,
         })
     }
 
+    /// 二进制格式：[count: u64][id: u64, dims: u32, f32 values...]+
+    fn load_from_file(path: &Path) -> Result<HashMap<u64, Vec<f32>>> {
+        let data = std::fs::read(path)?;
+        if data.len() < 8 {
+            return Err(anyhow::anyhow!("file too small"));
+        }
+        let count = u64::from_le_bytes(data[0..8].try_into()?) as usize;
+        let mut cursor = 8usize;
+        let mut map = HashMap::with_capacity(count);
+        for _ in 0..count {
+            if cursor + 12 > data.len() {
+                return Err(anyhow::anyhow!("truncated header"));
+            }
+            let id = u64::from_le_bytes(data[cursor..cursor + 8].try_into()?);
+            cursor += 8;
+            let dims = u32::from_le_bytes(data[cursor..cursor + 4].try_into()?) as usize;
+            cursor += 4;
+            let byte_len = dims * 4;
+            if cursor + byte_len > data.len() {
+                return Err(anyhow::anyhow!("truncated vector data"));
+            }
+            let values: Vec<f32> = data[cursor..cursor + byte_len]
+                .chunks_exact(4)
+                .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                .collect();
+            cursor += byte_len;
+            map.insert(id, values);
+        }
+        Ok(map)
+    }
+
+    /// 添加向量（保持与 usearch 相同的 &self 接口，内部用 RwLock）
     pub fn add(&self, chunk_id: u64, embedding: &[f32]) -> Result<()> {
-        self.index.add(chunk_id, embedding)?;
+        let mut guard = self
+            .vectors
+            .write()
+            .map_err(|_| anyhow::anyhow!("vector index write lock poisoned"))?;
+        guard.insert(chunk_id, embedding.to_vec());
         Ok(())
     }
 
-    /// 从向量索引中删除指定 chunk_id 对应的向量条目
+    /// 删除向量
     pub fn remove(&self, chunk_id: u64) -> Result<()> {
-        let _ = self.index.remove(chunk_id)?;
+        let mut guard = self
+            .vectors
+            .write()
+            .map_err(|_| anyhow::anyhow!("vector index write lock poisoned"))?;
+        guard.remove(&chunk_id);
         Ok(())
     }
 
+    /// 余弦距离暴力搜索，返回 (chunk_id, distance) 升序（越小越相似）
     pub fn search(&self, query: &[f32], top_k: usize) -> Result<Vec<(u64, f32)>> {
-        let results = self.index.search(query, top_k)?;
-        Ok(results
-            .keys
+        let guard = self
+            .vectors
+            .read()
+            .map_err(|_| anyhow::anyhow!("vector index read lock poisoned"))?;
+
+        if guard.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let q_norm: f32 = query.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if q_norm == 0.0 {
+            return Ok(vec![]);
+        }
+
+        let mut scores: Vec<(u64, f32)> = guard
             .iter()
-            .zip(results.distances.iter())
-            .map(|(&k, &d)| (k, d))
-            .collect())
+            .map(|(&id, vec)| {
+                let dot: f32 = query.iter().zip(vec.iter()).map(|(a, b)| a * b).sum();
+                let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
+                // cosine distance: 0=完全相同, 1=正交, 2=完全相反
+                let distance = if norm == 0.0 {
+                    1.0
+                } else {
+                    1.0 - dot / (q_norm * norm)
+                };
+                (id, distance)
+            })
+            .collect();
+
+        scores.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores.truncate(top_k);
+        Ok(scores)
     }
 
+    /// 持久化到磁盘
     pub fn save(&self) -> Result<()> {
-        self.index.save(self.path.to_str().unwrap())?;
+        let guard = self
+            .vectors
+            .read()
+            .map_err(|_| anyhow::anyhow!("vector index read lock poisoned"))?;
+
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let count = guard.len();
+        let mut data = Vec::with_capacity(8 + count * (8 + 4 + self.dimensions * 4));
+        data.extend_from_slice(&(count as u64).to_le_bytes());
+        for (&id, values) in guard.iter() {
+            data.extend_from_slice(&id.to_le_bytes());
+            data.extend_from_slice(&(values.len() as u32).to_le_bytes());
+            for &v in values {
+                data.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        std::fs::write(&self.path, data)?;
         Ok(())
     }
 
-    /// 清空向量索引，重新创建一个空索引（保留路径和维度配置）
+    /// 清空索引（&mut self，由 Mutex<Option<VectorIndex>> 的 as_mut() 调用）
     pub fn reset(&mut self) -> Result<()> {
+        let mut guard = self
+            .vectors
+            .write()
+            .map_err(|_| anyhow::anyhow!("vector index write lock poisoned"))?;
+        guard.clear();
         let _ = std::fs::remove_file(&self.path);
-        let mut options = IndexOptions::default();
-        options.dimensions = self.dimensions;
-        options.metric = MetricKind::Cos;
-        options.quantization = ScalarKind::F16;
-        let new_index = Index::new(&options)?;
-        new_index.reserve(100_000)?;
-        self.index = new_index;
         Ok(())
     }
 
     pub fn len(&self) -> usize {
-        self.index.size()
+        self.vectors.read().map(|g| g.len()).unwrap_or(0)
     }
 }

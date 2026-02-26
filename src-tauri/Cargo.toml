@@ -38,7 +38,6 @@ tantivy = "0.22"
 ort = { version = "2.0.0-rc.11", features = ["download-binaries"] }
 tokenizers = "0.19"
 ndarray = "0.15"
-usearch = "2"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 futures-util = "0.3"
