@@ -243,49 +243,57 @@ pub fn list_llm_models(state: State<'_, AppState>) -> Vec<String> {
     found
 }
 
-/// 加载指定路径的 GGUF 模型
+/// 加载指定路径的 GGUF 模型（后台线程异步加载，立即返回）
+///
+/// 加载结果通过 Tauri 事件通知前端：
+/// - 成功：emit "llm-loaded" (payload = path)
+/// - 失败：emit "llm-load-failed" (payload = 错误描述)
 #[tauri::command]
-pub fn load_llm_model(
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
-    let p = Path::new(&path);
-    if !p.exists() {
+pub fn load_llm_model(path: String, app: AppHandle) -> Result<(), String> {
+    if !Path::new(&path).exists() {
         return Err(format!("文件不存在: {path}"));
     }
-    // 先释放旧模型（触发 LlamaBackend::drop，重置 INITIALIZED 标志）
-    // 必须在 Llm::load 之前完成，否则 LlamaBackend::init 会报 BackendAlreadyInitialized
-    {
-        let mut guard = state
-            .llm
-            .lock()
-            .map_err(|_| "llm lock poisoned".to_string())?;
-        *guard = None;
-    }
 
-    match Llm::load(p) {
-        Ok(llm) => {
-            {
-                let mut guard = state
-                    .llm
-                    .lock()
-                    .map_err(|_| "llm lock poisoned".to_string())?;
-                *guard = Some(llm);
+    // 立即返回，实际加载在后台线程完成
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+
+        // 持有加载互斥锁，防止与启动自动加载线程并发（避免 BackendAlreadyInitialized）
+        // 如果自动加载正在进行，此处会阻塞直到其完成，再进行模型切换
+        let _loading_guard = match state.llm_loading.lock() {
+            Ok(g) => g,
+            Err(_) => {
+                let _ = app.emit("llm-load-failed", "内部错误：加载互斥锁中毒");
+                return;
             }
-            // 记住最后加载的模型路径，下次启动自动恢复
-            if let Ok(db) = state.db.lock() {
-                let _ = db.execute(
-                    "INSERT OR REPLACE INTO settings (key, value) VALUES ('last_llm_path', ?1)",
-                    rusqlite::params![path],
-                );
-            }
-            Ok(format!(
-                "模型加载成功: {}",
-                p.file_name().unwrap_or_default().to_string_lossy()
-            ))
+        };
+
+        // 先释放旧模型（触发 LlamaBackend::drop，重置 INITIALIZED 标志）
+        if let Ok(mut guard) = state.llm.lock() {
+            *guard = None;
         }
-        Err(e) => Err(format!("加载失败: {e}")),
-    }
+
+        match Llm::load(Path::new(&path)) {
+            Ok(llm) => {
+                if let Ok(mut guard) = state.llm.lock() {
+                    *guard = Some(llm);
+                }
+                // 记住最后加载的模型路径，下次启动自动恢复
+                if let Ok(db) = state.db.lock() {
+                    let _ = db.execute(
+                        "INSERT OR REPLACE INTO settings (key, value) VALUES ('last_llm_path', ?1)",
+                        rusqlite::params![path],
+                    );
+                }
+                let _ = app.emit("llm-loaded", &path);
+            }
+            Err(e) => {
+                let _ = app.emit("llm-load-failed", format!("加载失败: {e}"));
+            }
+        }
+    });
+
+    Ok(())
 }
 
 /// 对话历史消息（多轮追问用）

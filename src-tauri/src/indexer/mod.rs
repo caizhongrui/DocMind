@@ -17,7 +17,16 @@ const EXCLUDE_DIRS: &[&str] = &[
     "Thumbs.db",
 ];
 
-const SUPPORTED_EXTS: &[&str] = &["txt", "md", "csv", "pdf", "doc", "docx", "xlsx", "pptx", "zip"];
+const SUPPORTED_EXTS: &[&str] = &[
+    // 文档
+    "pdf", "doc", "docx", "ppt", "pptx", "rtf",
+    // 表格
+    "xls", "xlsx", "csv",
+    // 文本 / 标记
+    "txt", "md", "rst",
+    // 归档
+    "zip",
+];
 
 /// Phase 2 每个文件最多处理的 chunk 数，防止大文件内存/时间失控
 const MAX_CHUNKS_PER_FILE: usize = 100;

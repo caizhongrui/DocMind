@@ -1,10 +1,12 @@
-import { Layout, Button, Spin, Drawer, Tooltip, Typography, Progress, notification } from "antd";
+import { Layout, Button, Spin, Drawer, Tooltip, Typography, Progress, notification, Tour } from "antd";
+import type { TourProps } from "antd";
 import {
   SettingOutlined,
   RobotOutlined,
   MessageOutlined,
   FileSearchOutlined,
   CloudDownloadOutlined,
+  QuestionCircleOutlined,
 } from "@ant-design/icons";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -16,6 +18,7 @@ import Onboarding from "./pages/Onboarding";
 import SettingsDrawer from "./components/SettingsDrawer";
 import ModelManager from "./pages/ModelManager";
 import QAPanel from "./components/QAPanel";
+import HelpDrawer from "./components/HelpDrawer";
 
 const { Header } = Layout;
 
@@ -39,10 +42,12 @@ interface EmbedProgress {
 
 export default function App() {
   const [loading, setLoading] = useState(true);
-  const [hasFolders, setHasFolders] = useState(false);
+  const [, setHasFolders] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [qaOpen, setQaOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
   const [modelAvailable, setModelAvailable] = useState(false);
   const [embeddingCount, setEmbeddingCount] = useState(0);
   const [embedProgress, setEmbedProgress] = useState<EmbedProgress | null>(null);
@@ -183,6 +188,16 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
+  // ── 首次使用自动触发引导 ──
+  useEffect(() => {
+    if (!loading && modelAvailable) {
+      if (!localStorage.getItem("docmind_tour_done")) {
+        const t = setTimeout(() => setTourOpen(true), 600);
+        return () => clearTimeout(t);
+      }
+    }
+  }, [loading, modelAvailable]);
+
   if (loading) {
     return (
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", background: "var(--color-bg)" }}>
@@ -194,8 +209,8 @@ export default function App() {
     );
   }
 
-  if (!hasFolders) {
-    return <Onboarding onDone={() => setHasFolders(true)} />;
+  if (!modelAvailable) {
+    return <Onboarding onDone={() => setModelAvailable(true)} />;
   }
 
   const aiIconColor = modelAvailable && embeddingCount > 0
@@ -204,8 +219,58 @@ export default function App() {
 
   // embedding 进度百分比
   const embedPct = embedProgress
-    ? Math.round((embedProgress.done / Math.max(embedProgress.total, 1)) * 100)
+    ? Math.round(((embedProgress?.done ?? 0) / Math.max(embedProgress?.total ?? 1, 1)) * 100)
     : 0;
+
+  const handleTourClose = () => {
+    setTourOpen(false);
+    localStorage.setItem("docmind_tour_done", "1");
+  };
+
+  const tourSteps: TourProps["steps"] = [
+    {
+      title: "第一步：添加文件夹",
+      description:
+        "点击设置按钮，将本地文件夹添加到监听列表。DocMind 会自动建立全文索引，之后可随时搜索文件内容。",
+      target: () => document.getElementById("tour-settings-btn")!,
+      placement: "bottomRight",
+    },
+    {
+      title: "第二步：搜索文档",
+      description:
+        "在搜索框中输入关键词即可全文搜索。支持 AND / OR / NOT 逻辑运算符，以及双引号精确短语搜索。",
+      target: () => document.getElementById("tour-search-input")!,
+      placement: "bottom",
+    },
+    {
+      title: "第三步：切换搜索模式",
+      description:
+        "全文：精确匹配内容关键词；文件名：按文件名查找；语义：AI 理解自然语言，无需精确关键词。",
+      target: () => document.getElementById("tour-search-mode")!,
+      placement: "bottom",
+    },
+    {
+      title: "第四步：AI 语义搜索",
+      description:
+        "点击机器人按钮下载本地 AI 模型，开启语义搜索功能。模型完全本地运行，不联网推理。",
+      target: () => document.getElementById("tour-ai-btn")!,
+      placement: "bottomRight",
+    },
+    {
+      title: "第五步：文档问答",
+      description:
+        "点击消息按钮打开文档问答面板，向 AI 提问，它会自动从你的文档中检索相关内容并生成回答。",
+      target: () => document.getElementById("tour-qa-btn")!,
+      placement: "bottomRight",
+    },
+    {
+      title: "使用帮助",
+      description:
+        "随时点击帮助按钮查阅支持的文件格式、键盘快捷键以及联系方式。也可在此重新查看本引导。",
+      target: () => document.getElementById("tour-help-btn")!,
+      placement: "bottomRight",
+    },
+  ];
 
   return (
     <>
@@ -246,7 +311,7 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
             {/* Embedding 进度指示 */}
             {embedProgress && (
-              <Tooltip title={`正在生成语义索引 ${embedProgress.done}/${embedProgress.total}：${embedProgress.current}`}>
+              <Tooltip title={`正在生成语义索引 ${embedProgress?.done}/${embedProgress?.total}：${embedProgress?.current}`}>
                 <div style={{
                   display: "flex", alignItems: "center", gap: 6,
                   padding: "0 8px", height: 28, borderRadius: 6,
@@ -297,6 +362,7 @@ export default function App() {
               : "配置 AI 语义搜索"
             }>
               <Button
+                id="tour-ai-btn"
                 type="text" size="small"
                 icon={<RobotOutlined style={{ fontSize: 16, color: aiIconColor }} />}
                 onClick={() => setModelOpen(true)}
@@ -305,6 +371,7 @@ export default function App() {
             </Tooltip>
             <Tooltip title="文档问答">
               <Button
+                id="tour-qa-btn"
                 type="text" size="small"
                 icon={<MessageOutlined style={{ fontSize: 16, color: "#64748b" }} />}
                 onClick={() => setQaOpen(true)}
@@ -313,9 +380,19 @@ export default function App() {
             </Tooltip>
             <Tooltip title="设置">
               <Button
+                id="tour-settings-btn"
                 type="text" size="small"
                 icon={<SettingOutlined style={{ fontSize: 16, color: "#64748b" }} />}
                 onClick={() => setSettingsOpen(true)}
+                style={{ width: 32, height: 32, borderRadius: 8 }}
+              />
+            </Tooltip>
+            <Tooltip title="帮助">
+              <Button
+                id="tour-help-btn"
+                type="text" size="small"
+                icon={<QuestionCircleOutlined style={{ fontSize: 16, color: "#64748b" }} />}
+                onClick={() => setHelpOpen(true)}
                 style={{ width: 32, height: 32, borderRadius: 8 }}
               />
             </Tooltip>
@@ -374,6 +451,16 @@ export default function App() {
       </Layout>
 
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <HelpDrawer
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        onStartTour={() => {
+          setHelpOpen(false);
+          localStorage.removeItem("docmind_tour_done");
+          setTimeout(() => setTourOpen(true), 300);
+        }}
+      />
+      <Tour open={tourOpen} onClose={handleTourClose} steps={tourSteps} />
 
       <Drawer
         title={

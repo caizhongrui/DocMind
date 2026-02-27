@@ -13,8 +13,12 @@ use llama_cpp_2::{
 use std::{num::NonZero, path::Path};
 
 pub struct Llm {
-    backend: LlamaBackend,
+    // 字段 drop 顺序 = 声明顺序：model 先释放（llama_free_model），
+    // 再释放 backend（llama_backend_free / Metal 上下文）。
+    // 若 backend 先 drop，Metal 设备已被释放，model drop 时 llama_free_model
+    // 尝试释放 Metal buffer 会陷入死锁 / crash，导致线程挂死。
     model: LlamaModel,
+    backend: LlamaBackend,
 }
 
 // llama-cpp-2 的 LlamaBackend / LlamaModel 内部是裸指针，

@@ -211,6 +211,7 @@ pub fn run() {
                 vector_index: Mutex::new(vector_index),
                 embedder: Mutex::new(embedder),
                 llm: Mutex::new(None),
+                llm_loading: Mutex::new(()),
                 model_dir,
                 vi_stamp_path,
                 llm_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -327,6 +328,11 @@ pub fn run() {
                     let state = app_handle.state::<AppState>();
                     let p = std::path::Path::new(&model_path);
                     if p.exists() {
+                        // 持有加载互斥锁，防止与手动切换并发导致 BackendAlreadyInitialized
+                        let _loading_guard = match state.llm_loading.lock() {
+                            Ok(g) => g,
+                            Err(_) => return,
+                        };
                         match llm::Llm::load(p) {
                             Ok(loaded) => {
                                 if let Ok(mut guard) = state.llm.lock() {

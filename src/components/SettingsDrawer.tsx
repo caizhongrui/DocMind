@@ -1,4 +1,4 @@
-import { Drawer, Button, List, Typography, Progress, message, Modal, Statistic, Input, InputNumber, Switch } from "antd";
+import { Drawer, Button, List, Typography, Progress, message, Modal, Statistic, InputNumber } from "antd";
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -20,7 +20,6 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n/index";
 import { THEME_KEY, type ThemeMode } from "../main";
-import type { ApiLlmConfig } from "../types";
 
 interface IndexProgress {
   total: number;
@@ -43,18 +42,6 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
   const [stats, setStats] = useState<{ file_count: number; chunk_count: number; db_size_mb: number } | null>(null);
   const [clearing, setClearing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
-
-  // ── API LLM 配置 ──
-  const [apiConfig, setApiConfig] = useState<ApiLlmConfig>({
-    enabled: false,
-    endpoint: "https://api.openai.com/v1/chat/completions",
-    api_key: "",
-    model_name: "gpt-4o-mini",
-    temperature: 0.7,
-    max_tokens: 2048,
-    top_p: 1.0,
-  });
-  const [savingApiConfig, setSavingApiConfig] = useState(false);
 
   // ── 外观 ──
   const [themeMode, setThemeMode] = useState<ThemeMode>(
@@ -105,9 +92,6 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
       loadStats();
       invoke<string | null>("get_global_shortcut")
         .then((s) => setShortcut(s ?? ""))
-        .catch(() => {});
-      invoke<ApiLlmConfig>("get_api_llm_config")
-        .then(setApiConfig)
         .catch(() => {});
       invoke<number>("get_reindex_interval").then(v => setReindexInterval(v)).catch(() => {});
     }
@@ -367,18 +351,6 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
     }
   };
 
-  const saveApiConfig = async () => {
-    setSavingApiConfig(true);
-    try {
-      await invoke("set_api_llm_config", { config: apiConfig });
-      message.success("API 配置已保存");
-    } catch (e: unknown) {
-      message.error(`保存失败：${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setSavingApiConfig(false);
-    }
-  };
-
   return (
     <Drawer
       title={
@@ -393,18 +365,6 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
       styles={{
         body: { padding: "20px 24px", background: "var(--color-bg)" },
       }}
-      footer={
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={addFolder}
-          loading={indexing !== null}
-          block
-          style={{ borderRadius: 8, height: 38 }}
-        >
-          添加文件夹
-        </Button>
-      }
     >
       {/* ── 监听文件夹 ── */}
       <div style={{
@@ -503,7 +463,7 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
           )}
           {folders.length === 0 ? (
             <div style={{ padding: "24px 16px", textAlign: "center", color: "var(--color-text-muted)", fontSize: 13 }}>
-              暂未添加文件夹，点击下方按钮添加
+              暂未添加文件夹，点击下方按钮或拖拽文件夹到此处
             </div>
           ) : (
             <List
@@ -557,6 +517,20 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
               )}
             />
           )}
+        </div>
+
+        {/* 添加文件夹按钮 */}
+        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--color-border)" }}>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={addFolder}
+            loading={indexing !== null}
+            block
+            style={{ borderRadius: 8, height: 36 }}
+          >
+            添加文件夹
+          </Button>
         </div>
       </div>
 
@@ -680,107 +654,6 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
               ))}
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* ── 在线 API ── */}
-      <div style={{
-        background: "var(--color-surface)",
-        borderRadius: 10,
-        border: "1px solid var(--color-border)",
-        overflow: "hidden",
-        marginTop: 16,
-      }}>
-        <div style={{
-          padding: "12px 16px",
-          borderBottom: "1px solid var(--color-border)",
-          display: "flex", alignItems: "center", gap: 7,
-        }}>
-          <GlobalOutlined style={{ color: "#16a34a", fontSize: 14 }} />
-          <Typography.Text strong style={{ fontSize: 13 }}>在线 API（OpenAI 兼容）</Typography.Text>
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {apiConfig.enabled ? "已启用" : "已禁用"}
-            </Typography.Text>
-            <Switch
-              size="small"
-              checked={apiConfig.enabled}
-              onChange={(v) => setApiConfig(prev => ({ ...prev, enabled: v }))}
-            />
-          </div>
-        </div>
-        <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-          <div>
-            <Typography.Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>API 端点</Typography.Text>
-            <Input
-              size="small"
-              value={apiConfig.endpoint}
-              onChange={(e) => setApiConfig(prev => ({ ...prev, endpoint: e.target.value }))}
-              placeholder="https://api.openai.com/v1/chat/completions"
-              style={{ borderRadius: 6 }}
-            />
-          </div>
-          <div>
-            <Typography.Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>API Key</Typography.Text>
-            <Input.Password
-              size="small"
-              value={apiConfig.api_key}
-              onChange={(e) => setApiConfig(prev => ({ ...prev, api_key: e.target.value }))}
-              placeholder="sk-..."
-              style={{ borderRadius: 6 }}
-            />
-          </div>
-          <div>
-            <Typography.Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>模型名称</Typography.Text>
-            <Input
-              size="small"
-              value={apiConfig.model_name}
-              onChange={(e) => setApiConfig(prev => ({ ...prev, model_name: e.target.value }))}
-              placeholder="gpt-4o-mini"
-              style={{ borderRadius: 6 }}
-            />
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-            <div>
-              <Typography.Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>温度</Typography.Text>
-              <InputNumber
-                size="small"
-                min={0} max={2} step={0.1}
-                value={apiConfig.temperature}
-                onChange={(v) => v !== null && setApiConfig(prev => ({ ...prev, temperature: v }))}
-                style={{ width: "100%", borderRadius: 6 }}
-              />
-            </div>
-            <div>
-              <Typography.Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>最大 Token</Typography.Text>
-              <InputNumber
-                size="small"
-                min={128} max={8192} step={256}
-                value={apiConfig.max_tokens}
-                onChange={(v) => v !== null && setApiConfig(prev => ({ ...prev, max_tokens: v }))}
-                style={{ width: "100%", borderRadius: 6 }}
-              />
-            </div>
-            <div>
-              <Typography.Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>Top P</Typography.Text>
-              <InputNumber
-                size="small"
-                min={0} max={1} step={0.05}
-                value={apiConfig.top_p}
-                onChange={(v) => v !== null && setApiConfig(prev => ({ ...prev, top_p: v }))}
-                style={{ width: "100%", borderRadius: 6 }}
-              />
-            </div>
-          </div>
-          <Button
-            type="primary"
-            size="small"
-            loading={savingApiConfig}
-            onClick={saveApiConfig}
-            style={{ borderRadius: 8, alignSelf: "flex-start" }}
-          >
-            保存配置
-          </Button>
         </div>
       </div>
 

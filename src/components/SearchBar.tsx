@@ -63,6 +63,7 @@ export default function SearchBar({ modelAvailable }: { modelAvailable: boolean 
 
   const historyItems = searchHistory
     .filter(h => h.mode === mode)
+    .slice(0, 5)
     .map(h => ({
       key: String(h.id),
       label: (
@@ -95,6 +96,7 @@ export default function SearchBar({ modelAvailable }: { modelAvailable: boolean 
         trigger={[]}
       >
         <Input
+          id="tour-search-input"
           ref={inputRef}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -153,6 +155,7 @@ export default function SearchBar({ modelAvailable }: { modelAvailable: boolean 
         </Tooltip>
       )}
       <Segmented
+        id="tour-search-mode"
         value={mode}
         onChange={(val) => {
           if (val === "semantic" && !modelAvailable) return;

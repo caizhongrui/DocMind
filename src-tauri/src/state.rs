@@ -25,6 +25,8 @@ pub struct AppState {
     pub vector_index: Mutex<Option<VectorIndex>>,
     pub embedder: Mutex<Option<Embedder>>,
     pub llm: Mutex<Option<Llm>>,
+    /// 序列化 LLM 加载操作，防止启动自动加载与手动切换并发导致 BackendAlreadyInitialized
+    pub llm_loading: Mutex<()>,
     pub model_dir: PathBuf,
     /// 向量索引 stamp 文件路径（记录上次保存时 DB max chunk_id，用于启动时一致性校验）
     pub vi_stamp_path: PathBuf,

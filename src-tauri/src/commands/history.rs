@@ -16,7 +16,7 @@ pub fn get_search_history(
     state: State<'_, AppState>,
 ) -> Result<Vec<SearchHistoryItem>, String> {
     let db = state.db.lock().map_err(|_| "db lock poisoned")?;
-    let limit = limit.unwrap_or(30).min(50);
+    let limit = limit.unwrap_or(5).min(5);
     let mut stmt = db
         .prepare(
             "SELECT id, query, mode, used_at FROM search_history \
@@ -60,11 +60,11 @@ pub fn add_search_history(
     let count: i64 = db
         .query_row("SELECT COUNT(*) FROM search_history", [], |r| r.get(0))
         .unwrap_or(0);
-    if count > 50 {
+    if count > 5 {
         let _ = db.execute(
             "DELETE FROM search_history WHERE id IN \
              (SELECT id FROM search_history ORDER BY used_at ASC LIMIT ?1)",
-            rusqlite::params![count - 50],
+            rusqlite::params![count - 5],
         );
     }
     Ok(())

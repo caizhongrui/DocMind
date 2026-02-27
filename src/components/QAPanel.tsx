@@ -26,15 +26,12 @@ import {
   ExportOutlined,
   MessageOutlined,
   FileTextOutlined,
-  HistoryOutlined,
-  PlusOutlined,
-  ApiOutlined,
 } from "@ant-design/icons";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { useState, useEffect, useRef } from "react";
-import type { SourceRef, Message, ConversationInfo, MessageInfo, GgufModelInfo } from "../types";
+import type { SourceRef, Message, GgufModelInfo } from "../types";
 
 interface DownloadProgress {
   model_id: string;
@@ -43,6 +40,25 @@ interface DownloadProgress {
 }
 
 const LAST_MODEL_KEY = "docmind_last_llm_model_path";
+
+// 各模型的描述与建议标签
+const MODEL_META: Record<string, { desc: string; tag?: string; tagColor?: string }> = {
+  "qwen3-0.6b-q4": {
+    desc: "超轻量，内存占用最低（约 600MB），速度最快，适合 4GB 内存及低配设备，回答深度有限",
+    tag: "低配",
+    tagColor: "#64748b",
+  },
+  "qwen3-1.7b-q4": {
+    desc: "性能与资源最均衡，中文理解好，文档问答质量优秀，适合绝大多数用户",
+    tag: "推荐",
+    tagColor: "#1677ff",
+  },
+  "qwen3-4b-q4": {
+    desc: "推理能力更强，长文档理解与逻辑分析更准确，需 8GB+ 内存，生成速度较慢",
+    tag: "高质量",
+    tagColor: "#7c3aed",
+  },
+};
 
 export default function QAPanel() {
   const [models, setModels] = useState<GgufModelInfo[]>([]);
@@ -57,21 +73,8 @@ export default function QAPanel() {
   // true = 连续对话（保留历史），false = 单次问答（每次独立）
   const [continuous, setContinuous] = useState(true);
 
-  // 对话历史相关 state
-  const [conversations, setConversations] = useState<ConversationInfo[]>([]);
-  const [currentConvId, setCurrentConvId] = useState<number | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [apiMode, setApiMode] = useState(false);
-
   const bottomRef = useRef<HTMLDivElement>(null);
   const autoLoadedRef = useRef(false);
-  // 用于在 ask-done 事件回调中获取当前对话 ID（解决闭包问题）
-  const currentConvIdRef = useRef<number | null>(null);
-
-  // 同步 currentConvId 到 ref，供事件回调使用
-  useEffect(() => {
-    currentConvIdRef.current = currentConvId;
-  }, [currentConvId]);
 
   const handleClear = () => {
     setMessages([]);
@@ -133,9 +136,10 @@ export default function QAPanel() {
     autoLoadedRef.current = true;
     const modelId = resolveModelId(savedPath, modelList);
     setLoadingModel(modelId);
-    invoke<string>("load_llm_model", { path: savedPath })
-      .then(() => { setLoadedModel(modelId); setLoadingModel(null); })
+    // load_llm_model 立即返回，结果由 llm-loaded / llm-load-failed 事件处理
+    invoke("load_llm_model", { path: savedPath })
       .catch(() => {
+        // 立即校验失败（文件不存在）
         autoLoadedRef.current = false;
         setLoadingModel(null);
         localStorage.removeItem(LAST_MODEL_KEY);
@@ -155,14 +159,10 @@ export default function QAPanel() {
     if (!selected) return;
     try {
       const destPath = await invoke<string>("import_custom_gguf", { path: selected as string });
-      // 自动加载导入的模型
+      // 自动加载导入的模型（后台异步，结果由 llm-loaded / llm-load-failed 事件处理）
       const filename = (destPath as string).split(/[\\/]/).pop() ?? "custom";
       setLoadingModel("custom");
-      await invoke<string>("load_llm_model", { path: destPath });
-      setLoadedModel("custom");
-      setLoadingModel(null);
-      localStorage.setItem(LAST_MODEL_KEY, destPath as string);
-      // 将自定义模型加入列表展示
+      // 先将自定义模型加入列表（invoke 立即返回，加载在后台进行）
       setModels((prev) => {
         if (prev.some((m) => m.path === destPath)) return prev;
         return [...prev, {
@@ -174,6 +174,7 @@ export default function QAPanel() {
           path: destPath as string,
         }];
       });
+      await invoke("load_llm_model", { path: destPath });
     } catch (e) {
       setLoadingModel(null);
       setMessages((prev) => [...prev, {
@@ -184,39 +185,8 @@ export default function QAPanel() {
     }
   };
 
-  // 对话管理函数
-  const loadConversations = async () => {
-    const list = await invoke<ConversationInfo[]>("list_conversations");
-    setConversations(list);
-    return list;
-  };
-
-  const createNewConversation = async () => {
-    const id = await invoke<number>("create_conversation");
-    setCurrentConvId(id);
-    setMessages([]);
-    setInput("");
-    await loadConversations();
-    return id;
-  };
-
-  const selectConversation = async (id: number) => {
-    setCurrentConvId(id);
-    const msgs = await invoke<MessageInfo[]>("get_conversation_messages", { conversation_id: id });
-    setMessages(msgs.map(m => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-      sources: m.sources_json ? JSON.parse(m.sources_json) : undefined,
-    })));
-  };
-
   useEffect(() => {
     refreshModels();
-
-    // 加载 API 模式状态
-    invoke<{ enabled: boolean }>("get_api_llm_config")
-      .then((config) => setApiMode(config.enabled))
-      .catch(() => {});
 
     // 监听后端自动加载完成事件，更新 UI 状态
     const pAutoLoaded = listen<string>("llm-auto-loaded", (ev) => {
@@ -239,6 +209,31 @@ export default function QAPanel() {
     // 监听后端自动加载失败事件（模型文件不存在或加载出错）
     const pAutoFailed = listen<string>("llm-auto-load-failed", () => {
       setLoadingModel(null);
+    });
+
+    // 监听手动 load_llm_model 完成事件（后台线程异步加载结果）
+    const pLoaded = listen<string>("llm-loaded", (ev) => {
+      const loadedPath = ev.payload;
+      setModels((prevModels) => {
+        const match = prevModels.find((m) => m.path === loadedPath);
+        const modelId = match?.id ?? "custom";
+        setLoadedModel(modelId);
+        setLoadingModel(null);
+        localStorage.setItem(LAST_MODEL_KEY, loadedPath);
+        if (!match) {
+          const filename = loadedPath.split(/[\\/]/).pop() ?? "custom";
+          if (!prevModels.some((m) => m.path === loadedPath)) {
+            return [...prevModels, { id: "custom", name: filename, filename, size_mb: 0, downloaded: true, path: loadedPath }];
+          }
+        }
+        return prevModels;
+      });
+    });
+
+    // 监听手动 load_llm_model 失败事件
+    const pLoadFailed = listen<string>("llm-load-failed", (ev) => {
+      setLoadingModel(null);
+      setMessages((prev) => [...prev, { role: "assistant", content: ev.payload, error: true }]);
     });
 
     const p0 = listen<DownloadProgress>("gguf-download-progress", (ev) => {
@@ -264,20 +259,6 @@ export default function QAPanel() {
         const last = msgs[msgs.length - 1];
         if (last?.role === "assistant") {
           msgs[msgs.length - 1] = { ...last, streaming: false };
-          // 保存 assistant 消息到数据库
-          const convId = currentConvIdRef.current;
-          const assistantContent = last.content + ""; // 确保是字符串
-          // 注意：last.content 在此 setMessages 回调执行时已是最终内容
-          // 但由于 ask-done 触发时 ask-token 已全部到达，last.content 即为完整回复
-          if (convId && assistantContent) {
-            invoke("save_message", {
-              conversation_id: convId,
-              role: "assistant",
-              content: assistantContent,
-              sources_json: last.sources ? JSON.stringify(last.sources) : null,
-            }).catch(console.error);
-            loadConversations().catch(console.error);
-          }
         }
         return msgs;
       });
@@ -298,23 +279,11 @@ export default function QAPanel() {
     return () => {
       pAutoLoaded.then((fn) => fn());
       pAutoFailed.then((fn) => fn());
+      pLoaded.then((fn) => fn());
+      pLoadFailed.then((fn) => fn());
       p0.then((fn) => fn()); p2.then((fn) => fn());
       p3.then((fn) => fn()); p4.then((fn) => fn());
     };
-  }, []);
-
-  // 初始化对话历史
-  useEffect(() => {
-    const initConversations = async () => {
-      const list = await loadConversations();
-      if (list.length > 0) {
-        await selectConversation(list[0].id);
-      } else {
-        await createNewConversation();
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    initConversations();
   }, []);
 
   useEffect(() => {
@@ -335,13 +304,11 @@ export default function QAPanel() {
   const handleLoad = (model: GgufModelInfo) => {
     if (!model.path) return;
     setLoadingModel(model.id);
-    invoke<string>("load_llm_model", { path: model.path })
-      .then(() => {
-        setLoadedModel(model.id);
-        setLoadingModel(null);
-        localStorage.setItem(LAST_MODEL_KEY, model.path!);
-      })
+    // load_llm_model 立即返回，实际加载在后台进行
+    // 结果通过 llm-loaded / llm-load-failed 事件通知（见上方 useEffect 监听器）
+    invoke("load_llm_model", { path: model.path })
       .catch((e: unknown) => {
+        // 只处理立即校验错误（如文件不存在），异步加载错误由事件处理
         setMessages((prev) => [...prev, { role: "assistant", content: `加载失败: ${String(e)}`, error: true }]);
         setLoadingModel(null);
       });
@@ -366,19 +333,7 @@ export default function QAPanel() {
     setInput("");
     setAsking(true);
 
-    // 保存用户消息
-    const convId = currentConvId;
-    if (convId) {
-      invoke("save_message", {
-        conversation_id: convId,
-        role: "user",
-        content: userMessage,
-        sources_json: null,
-      }).catch(console.error);
-    }
-
-    const command = apiMode ? "ask_question_stream_api" : "ask_question_stream";
-    invoke<SourceRef[]>(command, { question: q, history })
+    invoke<SourceRef[]>("ask_question_stream", { question: q, history })
       .then((sources) => {
         // invoke 返回后 React state 已提交，可安全附加 sources 到最后一条 assistant 消息
         setMessages((prev) => {
@@ -429,60 +384,6 @@ export default function QAPanel() {
 
   return (
     <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
-      {/* 对话历史侧边栏 */}
-      {sidebarOpen && (
-        <div style={{
-          width: 200,
-          borderRight: "1px solid var(--color-border)",
-          display: "flex",
-          flexDirection: "column",
-          padding: "8px 0",
-          flexShrink: 0,
-          overflow: "hidden",
-        }}>
-          <Button
-            type="primary"
-            size="small"
-            style={{ margin: "0 8px 8px" }}
-            onClick={createNewConversation}
-            icon={<PlusOutlined />}
-          >新对话</Button>
-          <div style={{ overflowY: "auto", flex: 1 }}>
-            {conversations.map(conv => (
-              <div
-                key={conv.id}
-                onClick={() => selectConversation(conv.id)}
-                style={{
-                  padding: "6px 12px",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  background: currentConvId === conv.id ? "var(--color-bg-hover, rgba(0,0,0,0.05))" : "transparent",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                  {conv.title}
-                </span>
-                <DeleteOutlined
-                  style={{ fontSize: 10, color: "#94a3b8", flexShrink: 0, marginLeft: 4 }}
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    await invoke("delete_conversation", { conversation_id: conv.id });
-                    if (currentConvId === conv.id) {
-                      await createNewConversation();
-                    } else {
-                      await loadConversations();
-                    }
-                  }}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* 主对话区域 */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 0 }}>
@@ -565,8 +466,18 @@ export default function QAPanel() {
                   >
                     <List.Item.Meta
                       title={
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ fontSize: 13, color: "var(--color-text)" }}>{m.name}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 13, color: "var(--color-text)", fontWeight: 500 }}>{m.name}</span>
+                          {MODEL_META[m.id]?.tag && (
+                            <span style={{
+                              fontSize: 10, padding: "1px 7px", borderRadius: 99,
+                              background: (MODEL_META[m.id].tagColor ?? "#64748b") + "18",
+                              color: MODEL_META[m.id].tagColor ?? "#64748b",
+                              fontWeight: 600, border: `1px solid ${MODEL_META[m.id].tagColor ?? "#64748b"}30`,
+                            }}>
+                              {MODEL_META[m.id].tag}
+                            </span>
+                          )}
                           {m.downloaded && (
                             <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 10, background: "#dcfce7", color: "#16a34a", fontWeight: 500 }}>
                               已下载
@@ -575,9 +486,16 @@ export default function QAPanel() {
                         </div>
                       }
                       description={
-                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                          {m.size_mb >= 1000 ? `${(m.size_mb / 1024).toFixed(1)} GB` : `${m.size_mb} MB`}
-                        </Typography.Text>
+                        <div style={{ marginTop: 2 }}>
+                          {MODEL_META[m.id]?.desc && (
+                            <div style={{ fontSize: 11, color: "var(--color-text-secondary)", lineHeight: 1.5, marginBottom: 3 }}>
+                              {MODEL_META[m.id].desc}
+                            </div>
+                          )}
+                          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                            {m.size_mb >= 1000 ? `${(m.size_mb / 1024).toFixed(1)} GB` : `${m.size_mb} MB`}
+                          </Typography.Text>
+                        </div>
                       }
                     />
                   </List.Item>
@@ -621,21 +539,6 @@ export default function QAPanel() {
               flexShrink: 0,
             }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <Button
-                  size="small"
-                  icon={<HistoryOutlined />}
-                  onClick={() => setSidebarOpen(v => !v)}
-                  title="对话历史"
-                  style={{ marginRight: 4 }}
-                />
-                <Button
-                  size="small"
-                  icon={<ApiOutlined />}
-                  type={apiMode ? "primary" : "default"}
-                  onClick={() => setApiMode(v => !v)}
-                  title={apiMode ? "当前：在线 API 模式" : "当前：本地模型模式"}
-                  style={{ marginRight: 4 }}
-                />
                 <Tooltip title={continuous ? "当前：连续对话，AI 会记住上下文" : "当前：单次问答，每次独立检索"}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }} onClick={() => setContinuous((v) => !v)}>
                     {continuous
@@ -836,7 +739,7 @@ export default function QAPanel() {
                 if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAsk(); }
               }}
               placeholder={loadedModel ? "输入问题… (Enter 发送，Shift+Enter 换行)" : "请先加载模型"}
-              disabled={(!loadedModel && !apiMode) || asking}
+              disabled={!loadedModel || asking}
               autoSize={{ minRows: 1, maxRows: 5 }}
               style={{
                 flex: 1, borderRadius: 12,
@@ -859,7 +762,7 @@ export default function QAPanel() {
                 type="primary"
                 icon={<SendOutlined />}
                 onClick={handleAsk}
-                disabled={!input.trim() || (!loadedModel && !apiMode)}
+                disabled={!input.trim() || !loadedModel}
                 style={{ borderRadius: 8, height: 34 }}
               >
                 发送

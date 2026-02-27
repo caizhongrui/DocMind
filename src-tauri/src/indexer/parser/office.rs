@@ -2,6 +2,19 @@ use super::{ParseResult, ParseStatus};
 use std::io::Read;
 use std::path::Path;
 
+/// docx/pptx：每个 XML entry 最多读取的字节数
+const MAX_XML_ENTRY_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
+/// docx/pptx：全文提取总字符上限（超出则停止继续处理后续 entry）
+const MAX_XML_TOTAL_CHARS: usize = 300_000;
+
+/// .doc：最多从文件读取的字节数（full-read 方案，限制防 OOM）
+const MAX_DOC_READ_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
+
+/// xlsx：最多处理的行数（防止百万行 Excel OOM）
+const MAX_XLSX_ROWS: usize = 50_000;
+/// xlsx：全文提取总字符上限
+const MAX_XLSX_CONTENT_CHARS: usize = 300_000;
+
 /// 解析 docx / pptx（ZIP 包含 XML）
 pub fn parse_xml(path: &Path) -> ParseResult {
     match extract_xml_text(path) {
@@ -20,14 +33,21 @@ fn extract_xml_text(path: &Path) -> anyhow::Result<String> {
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
         let name = entry.name().to_string();
-        // docx: word/document.xml; pptx: ppt/slides/slide*.xml
         let is_content = (name.contains("word/document") || name.contains("ppt/slides/slide"))
             && name.ends_with(".xml");
-        if is_content {
-            let mut raw = String::new();
-            entry.read_to_string(&mut raw)?;
-            result.push_str(&strip_xml_tags(&raw));
-            result.push('\n');
+        if !is_content {
+            continue;
+        }
+
+        let mut raw = String::new();
+        // 限制单个 XML entry 读取量，防止异常大的嵌入内容 OOM
+        entry.take(MAX_XML_ENTRY_BYTES).read_to_string(&mut raw)?;
+        result.push_str(&strip_xml_tags(&raw));
+        result.push('\n');
+
+        // 提前终止：总内容已足够
+        if result.chars().count() >= MAX_XML_TOTAL_CHARS {
+            break;
         }
     }
     Ok(result)
@@ -60,10 +80,19 @@ fn strip_xml_tags(xml: &str) -> String {
 ///
 /// 对绝大多数包含纯文字的合同/方案 .doc 文件有效；对内嵌图片/复杂排版可能提取不完整。
 pub fn parse_doc(path: &Path) -> ParseResult {
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
+    let file = match std::fs::File::open(path) {
+        Ok(f) => f,
         Err(_) => return ParseResult::failed(),
     };
+
+    // 限制读取量，防止超大 .doc 文件 OOM（only first 50MB for byte-scanning）
+    let mut bytes = Vec::new();
+    if std::io::BufReader::new(file.take(MAX_DOC_READ_BYTES))
+        .read_to_end(&mut bytes)
+        .is_err()
+    {
+        return ParseResult::failed();
+    }
 
     // 先尝试 UTF-16 LE 扫描（Word 存储中文的主要编码）
     let text = extract_utf16le_text(&bytes);
@@ -118,8 +147,6 @@ fn extract_utf16le_text(bytes: &[u8]) -> String {
             segment.push(c);
             i += 2;
         } else {
-            // 连续可读字符段 >= 12 才保留（随机二进制字节偶然产生 3-5 个汉字范围码点很常见，
-            // 需要更长的连续段才能区分真实 UTF-16 LE 编码文本与二进制噪声）
             if segment.chars().count() >= 12 {
                 result.push_str(&segment);
                 result.push(' ');
@@ -140,9 +167,14 @@ pub fn parse_xlsx(path: &Path) -> ParseResult {
     match open_workbook_auto(path) {
         Ok(mut wb) => {
             let mut text = String::new();
-            for name in wb.sheet_names().to_vec() {
+            'outer: for name in wb.sheet_names().to_vec() {
                 if let Ok(range) = wb.worksheet_range(&name) {
+                    let mut row_count = 0usize;
                     for row in range.rows() {
+                        row_count += 1;
+                        if row_count > MAX_XLSX_ROWS {
+                            break;
+                        }
                         let line: Vec<String> = row
                             .iter()
                             .map(|c| c.to_string())
@@ -151,6 +183,10 @@ pub fn parse_xlsx(path: &Path) -> ParseResult {
                         if !line.is_empty() {
                             text.push_str(&line.join("\t"));
                             text.push('\n');
+                        }
+                        // 提前终止：总内容已足够
+                        if text.len() >= MAX_XLSX_CONTENT_CHARS {
+                            break 'outer;
                         }
                     }
                 }
