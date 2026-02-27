@@ -4,13 +4,21 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 const MODEL_VERSION: &str = "bge-small-zh-v1.5";
 
-// 模型文件下载地址（优先使用国内镜像，失败后回退到 HuggingFace 官方）
+// 模型文件下载地址（按优先级排列：国内镜像优先，最后回退到 HuggingFace 官方）
 const MODEL_ONNX_URLS: &[&str] = &[
+    // 国内镜像（速度快，推荐）
     "https://hf-mirror.com/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model.onnx",
+    "https://modelscope.cn/models/Xenova/bge-small-zh-v1.5/resolve/master/onnx/model.onnx",
+    "https://www.modelscope.cn/models/Xenova/bge-small-zh-v1.5/resolve/master/onnx/model.onnx",
+    // HuggingFace 官方（国际用户回退）
     "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model.onnx",
 ];
 const TOKENIZER_URLS: &[&str] = &[
+    // 国内镜像
     "https://hf-mirror.com/Xenova/bge-small-zh-v1.5/resolve/main/tokenizer.json",
+    "https://modelscope.cn/models/Xenova/bge-small-zh-v1.5/resolve/master/tokenizer.json",
+    "https://www.modelscope.cn/models/Xenova/bge-small-zh-v1.5/resolve/master/tokenizer.json",
+    // HuggingFace 官方
     "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/tokenizer.json",
 ];
 
