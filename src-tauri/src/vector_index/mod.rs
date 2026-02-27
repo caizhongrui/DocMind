@@ -43,6 +43,15 @@ impl VectorIndex {
             return Err(anyhow::anyhow!("file too small"));
         }
         let count = u64::from_le_bytes(data[0..8].try_into()?) as usize;
+        // 每条记录最少 12 字节（id:8 + dims:4 + 0个向量值），用文件大小做上界校验
+        // 防止旧格式文件（如 usearch 二进制）的头部被误读为超大 count 导致 OOM panic
+        let max_possible = data.len().saturating_sub(8) / 12;
+        if count > max_possible {
+            return Err(anyhow::anyhow!(
+                "invalid count {} (file size {} bytes, max possible entries {})",
+                count, data.len(), max_possible
+            ));
+        }
         let mut cursor = 8usize;
         let mut map = HashMap::with_capacity(count);
         for _ in 0..count {
