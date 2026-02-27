@@ -4,11 +4,15 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 const MODEL_VERSION: &str = "bge-small-zh-v1.5";
 
-// 模型文件下载地址（Xenova/bge-small-zh-v1.5 ONNX 格式）
-const MODEL_ONNX_URL: &str =
-    "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model.onnx";
-const TOKENIZER_URL: &str =
-    "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/tokenizer.json";
+// 模型文件下载地址（优先使用国内镜像，失败后回退到 HuggingFace 官方）
+const MODEL_ONNX_URLS: &[&str] = &[
+    "https://hf-mirror.com/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model.onnx",
+    "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model.onnx",
+];
+const TOKENIZER_URLS: &[&str] = &[
+    "https://hf-mirror.com/Xenova/bge-small-zh-v1.5/resolve/main/tokenizer.json",
+    "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/tokenizer.json",
+];
 
 #[derive(Serialize, Clone)]
 pub struct ModelStatus {
@@ -57,9 +61,9 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
 
     // 先下载 tokenizer.json（小文件）
-    download_file(
+    download_file_with_fallback(
         &client,
-        TOKENIZER_URL,
+        TOKENIZER_URLS,
         &model_dir.join("tokenizer.json"),
         &app,
         "tokenizer.json",
@@ -67,9 +71,9 @@ pub async fn download_model(app: AppHandle) -> Result<(), String> {
     .await?;
 
     // 再下载 model.onnx（大文件，~100MB）
-    download_file(
+    download_file_with_fallback(
         &client,
-        MODEL_ONNX_URL,
+        MODEL_ONNX_URLS,
         &model_dir.join("model.onnx"),
         &app,
         "model.onnx",
@@ -120,6 +124,29 @@ fn reload_ai_components(app: &AppHandle) -> Result<(), String> {
 
     println!("[embedder] hot-loaded successfully");
     Ok(())
+}
+
+/// 依次尝试 urls 中的每个地址，第一个成功的即完成下载，全部失败才返回错误
+async fn download_file_with_fallback(
+    client: &reqwest::Client,
+    urls: &[&str],
+    dest: &std::path::Path,
+    app: &AppHandle,
+    filename: &str,
+) -> Result<(), String> {
+    let mut last_err = String::new();
+    for &url in urls {
+        match download_file(client, url, dest, app, filename).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                eprintln!("[model] download failed from {url}: {e}, trying next source...");
+                last_err = e;
+                // 删除可能已写入的不完整文件，再尝试下一个源
+                let _ = std::fs::remove_file(dest);
+            }
+        }
+    }
+    Err(format!("所有下载源均失败：{last_err}"))
 }
 
 async fn download_file(
