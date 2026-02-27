@@ -253,6 +253,16 @@ pub fn load_llm_model(
     if !p.exists() {
         return Err(format!("文件不存在: {path}"));
     }
+    // 先释放旧模型（触发 LlamaBackend::drop，重置 INITIALIZED 标志）
+    // 必须在 Llm::load 之前完成，否则 LlamaBackend::init 会报 BackendAlreadyInitialized
+    {
+        let mut guard = state
+            .llm
+            .lock()
+            .map_err(|_| "llm lock poisoned".to_string())?;
+        *guard = None;
+    }
+
     match Llm::load(p) {
         Ok(llm) => {
             {
