@@ -9,6 +9,7 @@
 - 定价：后端动态配置，客户端启动时拉取
 - 激活码：支持，用于促销/礼品码/批量授权
 - 自动升级：支持，应用内下载安装，license 持久化不受影响
+- 管理后台：版本管理 + 收费管理统一在一个后台
 
 ---
 
@@ -23,8 +24,9 @@
 7. [微信支付接入流程](#微信支付接入流程)
 8. [激活码体系](#激活码体系)
 9. [自动升级](#自动升级)
-10. [防破解设计](#防破解设计)
-11. [换机与售后流程](#换机与售后流程)
+10. [管理后台](#管理后台)
+11. [防破解设计](#防破解设计)
+12. [换机与售后流程](#换机与售后流程)
 
 ---
 
@@ -848,6 +850,281 @@ public void publishVersion(@RequestBody PublishRequest req) {
 
 - **License payload `version` 字段**：当前为 `1`，若未来 payload 结构有变更，递增版本号，Rust 验证逻辑按版本分支处理，老 license 继续有效
 - **最低版本强制升级**：在 `latest.json` 可加 `min_version` 字段，低于此版本的客户端强制要求升级后才能使用（用于安全漏洞修复场景）
+
+---
+
+## 管理后台
+
+### 技术架构
+
+管理后台与业务后端**合并在同一个 Spring Boot 项目**中，前端独立部署：
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Spring Boot 后端                      │
+│                                                         │
+│   /api/*         客户端公开接口（无需登录）               │
+│   /admin/*       管理后台接口（JWT 认证，IP 白名单）      │
+│   /api/wechat/*  微信回调（微信服务器 IP 白名单）         │
+└────────────────────────┬────────────────────────────────┘
+                         │
+          ┌──────────────┴──────────────┐
+          ▼                             ▼
+  admin.docmind.app              api.docmind.app
+  （管理后台前端，Vue 3）          （供客户端调用）
+```
+
+**前端技术选型：Vue 3 + Element Plus**
+- 轻量，管理后台场景下组件齐全（表格、表单、对话框）
+- 无需与 Tauri 客户端保持一致，独立维护
+
+**认证方式：JWT + IP 白名单双重保护**
+- 登录后颁发 JWT，前端存 localStorage
+- 同时在 Nginx 层限制只允许固定 IP 访问 `/admin/*`
+- 管理员账号硬编码或存数据库（只有一个人，不需要 RBAC）
+
+---
+
+### 功能模块总览
+
+```
+管理后台
+├── 数据概览（Dashboard）
+├── 版本管理
+│   ├── 版本列表
+│   ├── 发布新版本
+│   └── 设置强制升级
+├── 定价管理
+│   └── 编辑产品信息（价格/划线价/促销标签/上下架）
+├── 订单管理
+│   ├── 订单列表
+│   ├── 订单详情
+│   └── 标记退款
+├── 激活码管理
+│   ├── 生成激活码（含批次标签）
+│   ├── 激活码列表（使用状态）
+│   ├── 导出 CSV
+│   └── 重置换机次数
+└── License 管理
+    ├── 按 MAC / 订单号查询激活状态
+    ├── 重新签发 License
+    └── 吊销 License
+```
+
+---
+
+### 各模块详细设计
+
+#### 1. 数据概览（Dashboard）
+
+展示核心指标，管理员登录后首页：
+
+| 指标卡片 | 数据来源 |
+|----------|----------|
+| 总收入（元） | `orders` where `status=paid` sum(amount) |
+| 今日新增订单 | `orders` where `paid_at >= today` |
+| 本月新增订单 | `orders` where `paid_at >= month_start` |
+| 累计激活用户 | `orders` + `activate_codes` where `used=true` |
+| 待处理换机申请 | 预留（目前换机自助完成）|
+| 当前最新版本 | `app_versions` where `is_latest=true` |
+
+```
+GET /admin/dashboard/stats
+```
+
+---
+
+#### 2. 版本管理
+
+**版本列表页**
+
+```
+GET /admin/versions?page=1&size=20
+```
+
+响应包含：版本号、发布时间、是否最新、各平台包大小、下载量（可选）
+
+**发布新版本**
+
+```
+POST /admin/versions/publish
+```
+
+请求体：
+```json
+{
+  "version": "1.3.0",
+  "release_notes": "### 更新内容\n- 修复若干问题",
+  "pub_date": "2026-02-28T10:00:00Z",
+  "min_version": null,
+  "platforms": {
+    "darwin-aarch64": {
+      "url": "https://cdn.docmind.app/releases/v1.3.0/DocMind_aarch64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIG..."
+    },
+    "darwin-x86_64": { "..." },
+    "windows-x86_64": { "..." }
+  }
+}
+```
+
+操作：写入 `app_versions`，旧版 `is_latest → FALSE`，新版 `is_latest → TRUE`。
+
+**设置强制升级**
+
+```
+PATCH /admin/versions/{id}
+Body: { "min_version": "1.2.0" }
+```
+
+低于 `min_version` 的客户端下次检测时，`/api/update/latest.json` 在响应中附加 `"force": true`，客户端收到后禁用主界面，强制用户升级。
+
+---
+
+#### 3. 定价管理
+
+**编辑产品信息**
+
+```
+PUT /admin/products/{product_id}
+```
+
+请求体（仅需传要修改的字段）：
+```json
+{
+  "price": 7800,
+  "original_price": 9800,
+  "price_display": "¥78",
+  "original_price_display": "¥98",
+  "discount_label": "新年特惠",
+  "active": true
+}
+```
+
+修改后客户端下次启动拉取 `/api/product/info` 时即生效，**无需发版**。
+
+`active: false` 用于临时下架（如支付系统维护），客户端隐藏付费入口。
+
+---
+
+#### 4. 订单管理
+
+**订单列表**
+
+```
+GET /admin/orders?page=1&size=20&status=paid&keyword=MAC地址或订单号
+```
+
+**订单详情**
+
+```
+GET /admin/orders/{order_id}
+```
+
+返回完整订单信息 + license_key + 换机历史。
+
+**标记退款**
+
+```
+POST /admin/orders/{order_id}/refund
+```
+
+操作：
+- `orders.status → refunded`
+- `orders.license_key → null`（license 失效，但客户端离线缓存仍有效，无法强制即时失效）
+- 如需让 license 在线失效，可将对应 license 加入黑名单表（见 License 管理）
+
+---
+
+#### 5. 激活码管理
+
+**生成激活码**
+
+```
+POST /admin/codes/generate
+Body: { "count": 100, "batch_tag": "2026双十一", "expires_at": "2026-12-31" }
+```
+
+响应：生成的激活码列表。
+
+**激活码列表**
+
+```
+GET /admin/codes?batch_tag=2026双十一&used=false&page=1
+```
+
+**导出 CSV**
+
+```
+GET /admin/codes/export?batch_tag=2026双十一
+```
+
+**重置换机次数**
+
+```
+POST /admin/codes/{id}/reset-reissue
+```
+
+---
+
+#### 6. License 管理
+
+**查询激活状态**
+
+```
+GET /admin/licenses/query?mac=aa:bb:cc:dd:ee:ff
+GET /admin/licenses/query?order_id=DM20260228000001
+```
+
+返回：绑定 MAC、激活时间、换机次数、当前 license 是否有效。
+
+**重新签发 License（换机）**
+
+```
+POST /admin/licenses/reissue
+Body: { "order_id": "DM20260228000001", "new_mac": "11:22:33:44:55:66", "reset_count": true }
+```
+
+用于：换机次数超限时客服人工处理。`reset_count: true` 表示同时重置换机计数。
+
+**吊销 License**
+
+```
+POST /admin/licenses/revoke
+Body: { "order_id": "DM20260228000001" }
+```
+
+将 `order_id` 加入 `revoked_licenses` 表。客户端联网时（如调用问答、语义搜索等需要后端的功能）可附带验证，命中黑名单则降级为 Free。
+
+> 注意：纯离线验证场景下，吊销无法即时生效。如需强制即时失效，须将相关功能改为在线验证（见防破解章节）。
+
+---
+
+### 管理后台数据库补充
+
+**吊销黑名单表 `revoked_licenses`**
+
+```sql
+CREATE TABLE revoked_licenses (
+  id          BIGINT PRIMARY KEY AUTO_INCREMENT,
+  order_id    VARCHAR(64) NOT NULL,
+  reason      VARCHAR(255),
+  revoked_at  DATETIME DEFAULT NOW(),
+  revoked_by  VARCHAR(64)              -- 操作人备注
+);
+```
+
+---
+
+### 管理后台安全措施
+
+| 措施 | 实现方式 |
+|------|----------|
+| 登录认证 | JWT，Token 有效期 8 小时，过期重新登录 |
+| IP 白名单 | Nginx `allow` 指令，只允许开发者固定 IP |
+| HTTPS | 所有请求走 HTTPS，禁止 HTTP 访问 |
+| 操作日志 | 关键操作（吊销、退款、生成码）记录到 `admin_logs` 表 |
+| 接口限流 | Spring Boot `RateLimiter`，防止暴力破解登录 |
 
 ---
 
