@@ -8,6 +8,7 @@
 - 付费模式：买断制（永久授权，`expires_at: "lifetime"`）
 - 定价：后端动态配置，客户端启动时拉取
 - 激活码：支持，用于促销/礼品码/批量授权
+- 自动升级：支持，应用内下载安装，license 持久化不受影响
 
 ---
 
@@ -21,8 +22,9 @@
 6. [数据库设计](#数据库设计)
 7. [微信支付接入流程](#微信支付接入流程)
 8. [激活码体系](#激活码体系)
-9. [防破解设计](#防破解设计)
-10. [换机与售后流程](#换机与售后流程)
+9. [自动升级](#自动升级)
+10. [防破解设计](#防破解设计)
+11. [换机与售后流程](#换机与售后流程)
 
 ---
 
@@ -569,6 +571,202 @@ POST /admin/codes/reissue     重置某激活码的换机次数
 ```
 
 这些接口通过 IP 白名单或独立管理 Token 保护，不对外暴露。
+
+---
+
+## 自动升级
+
+### 现状
+
+项目已具备：
+- `tauri-plugin-updater` 已引入（`Cargo.toml`）
+- minisign 公钥已内嵌（`tauri.conf.json` 的 `plugins.updater.pubkey`）
+- 更新检测端点：`https://update.docmind.app/latest.json`
+- `check_update` 命令：只返回 `bool`（是否有新版本）
+- App.tsx：检测到更新后仅弹出通知，提示去 GitHub 手动下载
+
+**缺失部分：** 应用内实际下载安装、下载进度展示、更新 manifest 的服务端、发布 CI/CD 流程。
+
+---
+
+### 整体流程
+
+```
+App 启动 5s 后
+  │
+  └─ check_update（已有）
+        │
+        ├─ 无更新 → 静默
+        │
+        └─ 有更新 → 顶栏显示更新按钮（已有 CloudDownloadOutlined）
+                      │
+                      └─ 用户点击 → 弹出更新对话框
+                                      │
+                                      ├─ 展示版本号 + 更新说明
+                                      ├─ 点击"立即更新"
+                                      │     │
+                                      │     └─ Rust: download_and_install
+                                      │           │
+                                      │           ├─ 事件推送下载进度
+                                      │           ├─ 验证 minisign 签名
+                                      │           └─ 安装完成 → 提示重启
+                                      │
+                                      └─ 点击"稍后更新" → 关闭对话框
+```
+
+---
+
+### 更新 Manifest 格式（latest.json）
+
+托管在 `https://update.docmind.app/latest.json`，由 Java 后端或静态文件服务提供：
+
+```json
+{
+  "version": "1.3.0",
+  "notes": "### 更新内容\n- 新增 PDF 超时保护\n- 修复暗色模式显示异常\n- 性能优化",
+  "pub_date": "2026-02-28T10:00:00Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "dW50cnVzdGVkIG...",
+      "url": "https://github.com/caizhongrui/DocMind/releases/download/v1.3.0/DocMind_1.3.0_aarch64.app.tar.gz"
+    },
+    "darwin-x86_64": {
+      "signature": "dW50cnVzdGVkIG...",
+      "url": "https://github.com/caizhongrui/DocMind/releases/download/v1.3.0/DocMind_1.3.0_x86_64.app.tar.gz"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIG...",
+      "url": "https://github.com/caizhongrui/DocMind/releases/download/v1.3.0/DocMind_1.3.0_x64-setup.nsis.zip"
+    }
+  }
+}
+```
+
+说明：
+- `notes` 支持 Markdown，展示在更新对话框中
+- `signature` 是每个平台包的 minisign 签名，Tauri 下载后强制验签，签名不对拒绝安装
+- 下载地址指向 GitHub Releases，利用 GitHub CDN，不消耗自己服务器带宽
+
+**更新 manifest 的职责**：每次发布新版本后，更新此 JSON 文件即可触发所有在线客户端的更新提示。可由 Java 后端提供动态接口（从数据库读取），也可以是 GitHub Pages 上的静态文件。
+
+---
+
+### 需新增的 Rust 命令
+
+当前 `check_update` 只返回 bool，需补充两个命令：
+
+**`get_update_info`** — 返回更新详情（版本号 + 更新说明）
+
+```rust
+#[derive(serde::Serialize)]
+pub struct UpdateInfo {
+    pub version: String,
+    pub notes: String,
+    pub current_version: String,
+}
+
+#[tauri::command]
+pub async fn get_update_info(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+    let update = app.updater()?.check().await.map_err(|e| e.to_string())?;
+    Ok(update.map(|u| UpdateInfo {
+        version: u.version.clone(),
+        notes: u.body.clone().unwrap_or_default(),
+        current_version: app.package_info().version.to_string(),
+    }))
+}
+```
+
+**`download_and_install_update`** — 实际下载安装，发送进度事件
+
+```rust
+#[tauri::command]
+pub async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), String> {
+    let update = app.updater()?.check().await.map_err(|e| e.to_string())?;
+    if let Some(update) = update {
+        let handle = app.clone();
+        update
+            .download_and_install(
+                |chunk_length, content_length| {
+                    let _ = handle.emit("update-progress", serde_json::json!({
+                        "downloaded": chunk_length,
+                        "total": content_length,
+                    }));
+                },
+                || {
+                    let _ = handle.emit("update-ready", ());
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+```
+
+前端监听 `update-progress` 展示进度条，监听 `update-ready` 展示"重启生效"按钮。
+
+---
+
+### CI/CD 发布流程（GitHub Actions）
+
+```yaml
+# .github/workflows/release.yml
+on:
+  push:
+    tags:
+      - 'v*'   # 推送 v1.3.0 标签时触发
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin     # Apple Silicon
+          - os: macos-13
+            target: x86_64-apple-darwin      # Intel Mac
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build & Sign
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: DocMind ${{ github.ref_name }}
+          releaseBody: ${{ github.event.head_commit.message }}
+```
+
+GitHub Actions 自动：
+1. 为每个平台编译 release 包
+2. 用 minisign 私钥（存于 GitHub Secrets）签名每个安装包
+3. 上传到 GitHub Releases
+4. 发布完成后手动（或自动脚本）更新 `latest.json`
+
+**密钥安全：** minisign 私钥仅存于 GitHub Secrets，任何人包括开发者本人不能从 Secrets 中读出明文，只有 CI 流程可以使用。
+
+---
+
+### License 在升级时的持久化
+
+| 存储位置 | 升级时行为 |
+|----------|-----------|
+| macOS Keychain | ✅ 完全不受影响，Keychain 与 App Bundle 解耦 |
+| `~/.config/docmind/license.key` | ✅ 应用更新不会删除用户配置目录 |
+| App Bundle 内部 | ❌ 禁止，更新会覆盖 Bundle |
+
+实现时 license 写入 Keychain 或 `~/.config/docmind/`，更新前后 license 验证行为完全一致，用户无感知。
+
+---
+
+### 版本兼容策略
+
+- **License payload `version` 字段**：当前为 `1`，若未来 payload 结构有变更，递增版本号，Rust 验证逻辑按版本分支处理，老 license 继续有效
+- **最低版本强制升级**：在 `latest.json` 可加 `min_version` 字段，低于此版本的客户端强制要求升级后才能使用（用于安全漏洞修复场景）
 
 ---
 
