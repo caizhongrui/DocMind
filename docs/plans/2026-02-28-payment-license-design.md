@@ -286,33 +286,7 @@ POST /api/wechat/notify
 - 后端验签 → 更新订单状态 → 生成 license key → 存入数据库
 - 返回微信要求的 `{ "code": "SUCCESS" }`
 
-#### 4. 换机激活
-
-```
-POST /api/license/reissue
-```
-
-请求体：
-```json
-{
-  "order_id": "DM20260228000001",
-  "old_mac": "aa:bb:cc:dd:ee:ff",
-  "new_mac": "11:22:33:44:55:66"
-}
-```
-
-响应：
-```json
-{
-  "license_key": "新license...",
-  "reissue_count": 1,
-  "reissue_limit": 3
-}
-```
-
-说明：每个订单最多允许换机 3 次，防止 license 被多人共享。
-
-#### 5. 激活码激活
+#### 4. 激活码激活
 
 ```
 POST /api/license/activate-by-code
@@ -390,7 +364,6 @@ CREATE TABLE orders (
   amount       INT NOT NULL,                    -- 金额（分）
   status       ENUM('pending','paid','expired','refunded') DEFAULT 'pending',
   license_key  TEXT,                            -- 生成后存储
-  reissue_count INT DEFAULT 0,                 -- 已换机次数
   paid_at      DATETIME,
   created_at   DATETIME DEFAULT NOW(),
   updated_at   DATETIME DEFAULT NOW() ON UPDATE NOW()
@@ -406,9 +379,8 @@ CREATE TABLE activate_codes (
   product_id    VARCHAR(32) NOT NULL,
   batch_tag     VARCHAR(64),                   -- 批次标签，如 "2026双十一" / "KOL-张三"
   used          BOOLEAN DEFAULT FALSE,
-  mac_address   VARCHAR(32),                   -- 激活时绑定
+  mac_address   VARCHAR(32),                   -- 激活时绑定，永久绑定不可换机
   license_key   TEXT,                          -- 激活后生成的 license
-  reissue_count INT DEFAULT 0,                -- 换机次数
   expires_at    DATE,                          -- 激活码本身的有效期（NULL = 永久有效）
   used_at       DATETIME,
   created_at    DATETIME DEFAULT NOW()
@@ -418,7 +390,7 @@ CREATE TABLE activate_codes (
 说明：
 - `batch_tag` 用于区分不同渠道/活动的激活码，方便统计
 - `expires_at` 是激活码的使用截止日期，与 license 的 `expires_at` 不同（license 是 lifetime）
-- 激活码一旦使用即绑定 MAC，与订单付费逻辑复用相同的 license 生成和换机流程
+- 激活码一旦使用即**永久绑定该 MAC**，不支持换机，换机须重新购买
 
 ---
 
@@ -1059,12 +1031,6 @@ GET /admin/codes?batch_tag=2026双十一&used=false&page=1
 GET /admin/codes/export?batch_tag=2026双十一
 ```
 
-**重置换机次数**
-
-```
-POST /admin/codes/{id}/reset-reissue
-```
-
 ---
 
 #### 6. License 管理
@@ -1076,16 +1042,7 @@ GET /admin/licenses/query?mac=aa:bb:cc:dd:ee:ff
 GET /admin/licenses/query?order_id=DM20260228000001
 ```
 
-返回：绑定 MAC、激活时间、换机次数、当前 license 是否有效。
-
-**重新签发 License（换机）**
-
-```
-POST /admin/licenses/reissue
-Body: { "order_id": "DM20260228000001", "new_mac": "11:22:33:44:55:66", "reset_count": true }
-```
-
-用于：换机次数超限时客服人工处理。`reset_count: true` 表示同时重置换机计数。
+返回：绑定 MAC、激活时间、当前 license 是否有效。
 
 **吊销 License**
 
@@ -1267,28 +1224,20 @@ macOS Keychain 存储的 license 不会随 App 卸载删除，重装后可自动
 
 ---
 
-## 换机与售后流程
+## 售后流程
 
-### 用户换机
+### 换机政策
 
-1. 用户在新机器上打开 DocMind → 提示"未激活"
-2. 用户点击"已购买，重新激活"→ 填入订单号
-3. 客户端自动获取新 MAC → 调用 `/api/license/reissue`
-4. 后端校验订单号有效且换机次数未超限 → 生成新 license 返回
-5. 客户端保存新 license → 解锁 Pro 功能
+**不支持换机，一机一码，换机需重新购买。**
 
-### 换机次数限制
-
-- 默认每个订单最多换机 **3 次**
-- 超出后提示联系客服（邮件：qdzy_cai@163.com）
-- 客服可在后台手动重置换机次数
+客户端在激活时将 MAC 地址永久写入 license，新设备无法使用旧 license。付费页和激活页需明确告知用户此政策。
 
 ### 退款
 
 - 微信支付支持原路退款（商户后台操作）
-- 退款后在数据库将对应 license 状态改为 `revoked`
-- 客户端无法实时感知（离线 license 的固有局限）
-- 如需立即失效，可将该 license 的 `issued_at` 日期设为未来的无效值并重新签发（需强制客户端在线验证一次）
+- 退款后在管理后台将对应订单标记 `refunded`，并将 `order_id` 加入 `revoked_licenses` 黑名单
+- 客户端纯离线时无法实时感知 license 吊销（离线验证的固有局限）
+- 若需强制即时失效，在后台吊销后，客户端下次调用需要联网的功能（语义搜索、问答）时附带在线验证，命中黑名单则降级为 Free
 
 ---
 
