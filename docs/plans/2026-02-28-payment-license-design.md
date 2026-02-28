@@ -616,9 +616,29 @@ App 启动 5s 后
 
 ---
 
+### 更新服务器架构（自建，适配国内网络）
+
+GitHub Releases 在国内访问不稳定，更新包下载和 manifest 全部走自建服务，不依赖 GitHub。
+
+```
+客户端检测更新
+  └─ GET https://update.docmind.app/api/update/latest.json
+             （Java 后端，从数据库读取当前最新版本）
+                    │
+                    └─ 下载地址指向 阿里云 OSS + CDN
+                       https://cdn.docmind.app/releases/v1.3.0/DocMind_aarch64.app.tar.gz
+```
+
+**为什么用 OSS + CDN 而不是直接放服务器：**
+- 安装包体积大（macOS 约 30-80MB，Windows 约 50MB），直接走服务器带宽费用高
+- OSS + CDN 国内回源快，下载速度稳定
+- 推荐：**阿里云 OSS**（存储）+ **阿里云 CDN**（加速），或腾讯云 COS + CDN
+
+---
+
 ### 更新 Manifest 格式（latest.json）
 
-托管在 `https://update.docmind.app/latest.json`，由 Java 后端或静态文件服务提供：
+由 Java 后端 `GET /api/update/latest.json` 动态提供（从 `app_versions` 表读取）：
 
 ```json
 {
@@ -628,15 +648,15 @@ App 启动 5s 后
   "platforms": {
     "darwin-aarch64": {
       "signature": "dW50cnVzdGVkIG...",
-      "url": "https://github.com/caizhongrui/DocMind/releases/download/v1.3.0/DocMind_1.3.0_aarch64.app.tar.gz"
+      "url": "https://cdn.docmind.app/releases/v1.3.0/DocMind_1.3.0_aarch64.app.tar.gz"
     },
     "darwin-x86_64": {
       "signature": "dW50cnVzdGVkIG...",
-      "url": "https://github.com/caizhongrui/DocMind/releases/download/v1.3.0/DocMind_1.3.0_x86_64.app.tar.gz"
+      "url": "https://cdn.docmind.app/releases/v1.3.0/DocMind_1.3.0_x86_64.app.tar.gz"
     },
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIG...",
-      "url": "https://github.com/caizhongrui/DocMind/releases/download/v1.3.0/DocMind_1.3.0_x64-setup.nsis.zip"
+      "url": "https://cdn.docmind.app/releases/v1.3.0/DocMind_1.3.0_x64-setup.nsis.zip"
     }
   }
 }
@@ -645,9 +665,7 @@ App 启动 5s 后
 说明：
 - `notes` 支持 Markdown，展示在更新对话框中
 - `signature` 是每个平台包的 minisign 签名，Tauri 下载后强制验签，签名不对拒绝安装
-- 下载地址指向 GitHub Releases，利用 GitHub CDN，不消耗自己服务器带宽
-
-**更新 manifest 的职责**：每次发布新版本后，更新此 JSON 文件即可触发所有在线客户端的更新提示。可由 Java 后端提供动态接口（从数据库读取），也可以是 GitHub Pages 上的静态文件。
+- 下载 URL 全部指向国内 CDN，与 GitHub 无关
 
 ---
 
@@ -707,7 +725,7 @@ pub async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), St
 
 ---
 
-### CI/CD 发布流程（GitHub Actions）
+### CI/CD 发布流程（GitHub Actions + 阿里云 OSS）
 
 ```yaml
 # .github/workflows/release.yml
@@ -730,6 +748,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
       - name: Build & Sign
         uses: tauri-apps/tauri-action@v0
         env:
@@ -739,15 +758,77 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: DocMind ${{ github.ref_name }}
           releaseBody: ${{ github.event.head_commit.message }}
+
+      - name: Upload to Aliyun OSS
+        uses: fangbinwei/aliyun-oss-website-action@v1
+        with:
+          accessKeyId: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          accessKeySecret: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          bucket: docmind-releases
+          endpoint: oss-cn-hangzhou.aliyuncs.com
+          folder: src-tauri/target/release/bundle  # Tauri 编译产物目录
+          prefix: releases/${{ github.ref_name }}/
+
+      - name: Notify backend to publish version
+        run: |
+          curl -X POST https://api.docmind.app/admin/versions/publish \
+            -H "Authorization: Bearer ${{ secrets.ADMIN_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "version": "${{ github.ref_name }}",
+              "release_notes": "${{ github.event.head_commit.message }}",
+              "platforms": {
+                "darwin-aarch64": {
+                  "url": "https://cdn.docmind.app/releases/${{ github.ref_name }}/DocMind_aarch64.app.tar.gz"
+                },
+                "darwin-x86_64": {
+                  "url": "https://cdn.docmind.app/releases/${{ github.ref_name }}/DocMind_x86_64.app.tar.gz"
+                },
+                "windows-x86_64": {
+                  "url": "https://cdn.docmind.app/releases/${{ github.ref_name }}/DocMind_x64-setup.nsis.zip"
+                }
+              }
+            }'
 ```
 
-GitHub Actions 自动：
-1. 为每个平台编译 release 包
-2. 用 minisign 私钥（存于 GitHub Secrets）签名每个安装包
-3. 上传到 GitHub Releases
-4. 发布完成后手动（或自动脚本）更新 `latest.json`
+**发布流程说明：**
 
-**密钥安全：** minisign 私钥仅存于 GitHub Secrets，任何人包括开发者本人不能从 Secrets 中读出明文，只有 CI 流程可以使用。
+```
+推送 v1.3.0 标签
+  │
+  ├─ 1. GitHub Actions 编译三平台安装包
+  ├─ 2. minisign 私钥签名（签名值附在安装包旁的 .sig 文件）
+  ├─ 3. 上传安装包到阿里云 OSS（国内 CDN 加速）
+  └─ 4. 调用后端 /admin/versions/publish
+           │
+           └─ 后端写入 app_versions 表
+              将旧版 is_latest = FALSE
+              新版 is_latest = TRUE
+              客户端下次检测立即拿到新版信息
+```
+
+**后端 `/admin/versions/publish` 接口（Java）：**
+
+```java
+// 后端从 OSS 下载安装包读取 .sig 文件获得 signature，写入 platforms JSON
+@PostMapping("/admin/versions/publish")
+public void publishVersion(@RequestBody PublishRequest req) {
+    // 1. 从 OSS 读取各平台 .sig 文件，获取 minisign signature
+    // 2. 插入 app_versions 表，is_latest = TRUE
+    // 3. 将旧版 is_latest 更新为 FALSE
+    appVersionService.publish(req);
+}
+```
+
+**密钥与凭证清单（全部存 GitHub Secrets）：**
+
+| Secret 名称 | 内容 |
+|------------|------|
+| `TAURI_SIGNING_PRIVATE_KEY` | minisign 私钥（base64）|
+| `TAURI_SIGNING_KEY_PASSWORD` | 私钥密码 |
+| `OSS_ACCESS_KEY_ID` | 阿里云 OSS AccessKey |
+| `OSS_ACCESS_KEY_SECRET` | 阿里云 OSS SecretKey |
+| `ADMIN_API_TOKEN` | 后端发布接口的认证 Token |
 
 ---
 
@@ -931,6 +1012,36 @@ macOS Keychain 存储的 license 不会随 App 卸载删除，重装后可自动
 - 退款后在数据库将对应 license 状态改为 `revoked`
 - 客户端无法实时感知（离线 license 的固有局限）
 - 如需立即失效，可将该 license 的 `issued_at` 日期设为未来的无效值并重新签发（需强制客户端在线验证一次）
+
+---
+
+### 版本表 `app_versions`（支撑更新服务）
+
+```sql
+CREATE TABLE app_versions (
+  id              BIGINT PRIMARY KEY AUTO_INCREMENT,
+  version         VARCHAR(16) NOT NULL,            -- 1.3.0
+  release_notes   TEXT,                            -- Markdown 格式更新说明
+  pub_date        DATETIME NOT NULL,
+  is_latest       BOOLEAN DEFAULT FALSE,           -- 只有一条为 TRUE
+  min_version     VARCHAR(16),                     -- 低于此版本强制升级（NULL = 不强制）
+  -- 各平台下载信息（JSON 存储，方便扩展新平台）
+  platforms       JSON NOT NULL,
+  created_at      DATETIME DEFAULT NOW()
+);
+
+-- platforms 字段示例：
+-- {
+--   "darwin-aarch64": {
+--     "signature": "...",
+--     "url": "https://cdn.docmind.app/releases/v1.3.0/DocMind_1.3.0_aarch64.app.tar.gz",
+--     "size": 52428800
+--   },
+--   ...
+-- }
+```
+
+后端接口 `GET /api/update/latest.json` 直接查询 `is_latest = TRUE` 的记录并组装返回，发布新版本只需插入一条记录并更新 `is_latest` 标志，**无需重启服务、无需改代码**。
 
 ---
 
