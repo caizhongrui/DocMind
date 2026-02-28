@@ -740,7 +740,6 @@ macOS Keychain 存储的 license 不会随 App 卸载删除，重装后可自动
 
 | 功能 | 说明 |
 |------|------|
-| 试用期 | 在 `products` 表加 `trial_days` 字段，license payload 加 `trial: true`，Rust 层判断 |
 | Windows 支持 | MAC 地址获取改用 `ipconfig /all` 解析；Keychain 改用 Windows DPAPI |
 | OCR 功能 | `license.features` 数组加入 `"ocr"` 即可，无需改验证逻辑 |
 | 多设备授权 | 换机次数限制改为设备绑定列表，允许同时激活 N 台 |
