@@ -18,6 +18,7 @@ const EXCLUDE_DIRS: &[&str] = &[
     "Thumbs.db",
 ];
 
+/// 解析器支持的全量扩展名（供设置 UI 展示所有可选类型）
 pub const SUPPORTED_EXTS: &[&str] = &[
     // 文档
     "pdf", "doc", "docx", "ppt", "pptx", "rtf",
@@ -29,6 +30,14 @@ pub const SUPPORTED_EXTS: &[&str] = &[
     "zip",
     // 图片（OCR）
     "jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp",
+];
+
+/// 默认启用的扩展名（key 不存在时的 fallback）；图片默认关闭，因 OCR 耗时且用户通常不需要
+pub const DEFAULT_INDEXED_EXTS: &[&str] = &[
+    "pdf", "doc", "docx", "ppt", "pptx", "rtf",
+    "xls", "xlsx", "csv",
+    "txt", "md", "rst",
+    "zip",
 ];
 
 /// Phase 2 每个文件最多处理的 chunk 数，防止大文件内存/时间失控
@@ -53,7 +62,7 @@ pub fn scan_and_index(folder: &Path, state: &AppState, app: &AppHandle) -> Resul
         )
         .ok()
         .map(|s| s.split(',').map(|e| e.trim().to_string()).filter(|e| !e.is_empty()).collect())
-        .unwrap_or_else(|| SUPPORTED_EXTS.iter().map(|s| s.to_string()).collect())
+        .unwrap_or_else(|| DEFAULT_INDEXED_EXTS.iter().map(|s| s.to_string()).collect())
     };
     let files = collect_files(folder, &enabled_exts);
     let total = files.len();

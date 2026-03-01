@@ -269,11 +269,11 @@ pub fn set_reindex_interval(minutes: u64, state: State<'_, AppState>) -> Result<
 /// key 不存在时返回全量默认列表（向后兼容）。
 #[tauri::command]
 pub fn get_indexed_types(state: State<'_, AppState>) -> Vec<String> {
-    use crate::indexer::SUPPORTED_EXTS;
+    use crate::indexer::DEFAULT_INDEXED_EXTS;
 
     let db = match state.db.lock().ok() {
         Some(d) => d,
-        None => return SUPPORTED_EXTS.iter().map(|s| s.to_string()).collect(),
+        None => return DEFAULT_INDEXED_EXTS.iter().map(|s| s.to_string()).collect(),
     };
 
     let raw: Option<String> = db
@@ -288,7 +288,7 @@ pub fn get_indexed_types(state: State<'_, AppState>) -> Vec<String> {
         Some(s) if !s.is_empty() => {
             s.split(',').map(|e| e.trim().to_string()).filter(|e| !e.is_empty()).collect()
         }
-        _ => SUPPORTED_EXTS.iter().map(|s| s.to_string()).collect(),
+        _ => DEFAULT_INDEXED_EXTS.iter().map(|s| s.to_string()).collect(),
     }
 }
 
@@ -302,7 +302,7 @@ pub fn set_indexed_types(
     cleanup_removed: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    use crate::indexer::SUPPORTED_EXTS;
+    use crate::indexer::DEFAULT_INDEXED_EXTS;
 
     // 1. 读取旧配置（用于计算被移除的类型）
     let old_types: Vec<String> = {
@@ -314,7 +314,7 @@ pub fn set_indexed_types(
         )
         .ok()
         .map(|s| s.split(',').map(|e| e.trim().to_string()).filter(|e| !e.is_empty()).collect())
-        .unwrap_or_else(|| SUPPORTED_EXTS.iter().map(|s| s.to_string()).collect())
+        .unwrap_or_else(|| DEFAULT_INDEXED_EXTS.iter().map(|s| s.to_string()).collect())
     };
 
     // 2. 保存新配置
