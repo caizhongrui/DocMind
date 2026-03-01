@@ -57,7 +57,7 @@ const FORMAT_GROUPS = [
     color: "#ea580c",
     bg: "rgba(234,88,12,0.08)",
     formats: [
-      { ext: "ZIP", desc: "解析内部文本文件" },
+      { ext: "ZIP", desc: "解析内部所有支持格式" },
     ],
   },
 ];
@@ -198,7 +198,7 @@ export default function HelpDrawer({ open, onClose, onStartTour }: Props) {
           }}>
             <Typography.Text type="secondary" style={{ fontSize: 11, lineHeight: 1.7, display: "block" }}>
               💡 <strong>图片型 PDF</strong>（扫描件）因无文字层无法提取内容，将跳过全文 / 语义索引，但文件名仍可检索。<br />
-              📦 <strong>ZIP</strong> 仅解析压缩包内的 .txt、.md、.csv 文件。<br />
+              📦 <strong>ZIP</strong> 支持解析压缩包内的 PDF、Word、Excel、PPT 及文本文件，每个文件最大 20 MB。<br />
               📄 <strong>PPT / DOC</strong> 采用字节扫描提取文字，效果可能不如 PPTX / DOCX。
             </Typography.Text>
           </div>
