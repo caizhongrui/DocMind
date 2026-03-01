@@ -26,6 +26,8 @@ const SUPPORTED_EXTS: &[&str] = &[
     "txt", "md", "rst",
     // 归档
     "zip",
+    // 图片（OCR）
+    "jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp",
 ];
 
 /// Phase 2 每个文件最多处理的 chunk 数，防止大文件内存/时间失控

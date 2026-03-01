@@ -44,15 +44,30 @@ futures-util = "0.3"
 tokio-util = { version = "0.7", features = ["io", "codec"] }
 base64 = "0.22"
 tempfile = "3"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff", "webp"] }
+pdfium-render = { version = "0.8", features = ["image", "thread_safe"] }
 
 # macOS：fsevent 文件监听 + Metal GPU 加速（llama.cpp + ONNX）
 [target.'cfg(target_os = "macos")'.dependencies]
 notify = { version = "6", features = ["macos_fsevent"] }
 llama-cpp-2 = { version = "0.1", features = ["metal"] }
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSDictionary", "NSString", "NSError"] }
+objc2-vision = { version = "0.3", features = ["VNRequest", "VNRequestHandler", "VNRecognizeTextRequest", "VNObservation"] }
 
 # Windows / Linux：polling 文件监听 + CPU 推理（llama.cpp CPU-only）
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 notify = "6"
 llama-cpp-2 = { version = "0.1" }
+
+# Windows：内置 OCR 引擎
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Foundation",
+    "Globalization",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Storage_Streams",
+] }
 
 [dev-dependencies]

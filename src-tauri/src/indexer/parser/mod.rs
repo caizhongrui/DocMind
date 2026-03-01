@@ -1,4 +1,6 @@
 pub mod archive;
+pub mod image;
+pub mod ocr;
 pub mod office;
 pub mod pdf;
 pub mod text;
@@ -32,6 +34,7 @@ impl ParseResult {
 // xls/xlsx          ：calamine 全量加载 workbook，严格限制。
 // zip               ：entry 流式读，上限较宽松。
 // pdf               ：pdf.rs 内部已有超时 + 大小检查，此处不再重复。
+// 图片              ：OCR 前先解码，限制文件大小防 OOM。
 //
 // ──────────────────────────────────────────────────────────────────────────
 const MAX_SIZE_TEXT: u64  = 500 * 1024 * 1024; // txt/md/csv/rst/rtf: 500 MB
@@ -39,6 +42,7 @@ const MAX_SIZE_DOC: u64   = 100 * 1024 * 1024; // doc/ppt:            100 MB
 const MAX_SIZE_DOCX: u64  = 300 * 1024 * 1024; // docx/pptx:          300 MB
 const MAX_SIZE_XLSX: u64  = 100 * 1024 * 1024; // xls/xlsx:           100 MB
 const MAX_SIZE_ZIP: u64   = 300 * 1024 * 1024; // zip:                300 MB
+const MAX_SIZE_IMAGE: u64 =  30 * 1024 * 1024; // 图片:                30 MB
 
 /// 解析后内容字符数上限，超出时截断并改为 Partial 状态。
 const MAX_CONTENT_CHARS: usize = 500_000;
@@ -53,12 +57,14 @@ pub fn parse_file(path: &Path) -> ParseResult {
     // ── 文件大小检查 ──────────────────────────────────────────────────────
     let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     let max_size = match ext.as_str() {
-        "txt" | "md" | "csv" | "rst" | "rtf" => MAX_SIZE_TEXT,
-        "doc"  | "ppt"                        => MAX_SIZE_DOC,
-        "docx" | "pptx"                       => MAX_SIZE_DOCX,
-        "xls"  | "xlsx"                       => MAX_SIZE_XLSX,
-        "zip"                                 => MAX_SIZE_ZIP,
-        _                                     => u64::MAX, // pdf 由 pdf.rs 自己管
+        "txt" | "md" | "csv" | "rst" | "rtf"               => MAX_SIZE_TEXT,
+        "doc"  | "ppt"                                      => MAX_SIZE_DOC,
+        "docx" | "pptx"                                     => MAX_SIZE_DOCX,
+        "xls"  | "xlsx"                                     => MAX_SIZE_XLSX,
+        "zip"                                               => MAX_SIZE_ZIP,
+        "jpg" | "jpeg" | "png" | "bmp" | "tiff" | "tif"
+        | "webp"                                            => MAX_SIZE_IMAGE,
+        _                                                   => u64::MAX, // pdf 由 pdf.rs 自己管
     };
     if file_size > max_size {
         eprintln!(
@@ -72,14 +78,16 @@ pub fn parse_file(path: &Path) -> ParseResult {
 
     // ── 解析 ──────────────────────────────────────────────────────────────
     let mut result = match ext.as_str() {
-        "txt" | "md" | "csv" | "rst" => text::parse(path),
-        "rtf"                         => text::parse_rtf(path),
-        "pdf"                         => pdf::parse(path),
-        "docx" | "pptx"              => office::parse_xml(path),
-        "xls"  | "xlsx"              => office::parse_xlsx(path),
-        "doc"  | "ppt"               => office::parse_doc(path), // 同为 CFB 二进制，字节扫描
-        "zip"                         => archive::parse_zip(path),
-        _                             => ParseResult::failed(),
+        "txt" | "md" | "csv" | "rst"                        => text::parse(path),
+        "rtf"                                               => text::parse_rtf(path),
+        "pdf"                                               => pdf::parse(path),
+        "docx" | "pptx"                                     => office::parse_xml(path),
+        "xls"  | "xlsx"                                     => office::parse_xlsx(path),
+        "doc"  | "ppt"                                      => office::parse_doc(path),
+        "zip"                                               => archive::parse_zip(path),
+        "jpg" | "jpeg" | "png" | "bmp" | "tiff" | "tif"
+        | "webp"                                            => image::parse_image(path),
+        _                                                   => ParseResult::failed(),
     };
 
     // ── 兜底内容截断 ──────────────────────────────────────────────────────

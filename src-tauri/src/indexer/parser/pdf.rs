@@ -56,7 +56,21 @@ fn parse_inner(path: &Path) -> ParseResult {
         );
     }
 
-    // 第三级：标记失败（专业版由上层触发 OCR）
+    // 第三级：OCR（扫描件 PDF，需要 pdfium 库可用）
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        match super::ocr::ocr_pdf(path) {
+            Ok(text) if !text.trim().is_empty() => {
+                eprintln!("[pdf] OCR fallback succeeded: {}", path.display());
+                return ParseResult { content: text, status: ParseStatus::Partial };
+            }
+            Err(e) => {
+                eprintln!("[pdf] OCR fallback failed ({}): {}", path.display(), e);
+            }
+            _ => {}
+        }
+    }
+
     ParseResult::failed()
 }
 

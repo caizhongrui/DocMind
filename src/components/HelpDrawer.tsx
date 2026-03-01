@@ -60,6 +60,18 @@ const FORMAT_GROUPS = [
       { ext: "ZIP", desc: "解析内部所有支持格式" },
     ],
   },
+  {
+    label: "图片 (OCR)",
+    color: "#0891b2",
+    bg: "rgba(8,145,178,0.08)",
+    formats: [
+      { ext: "JPG",  desc: "JPEG 图片" },
+      { ext: "PNG",  desc: "PNG 图片" },
+      { ext: "BMP",  desc: "位图" },
+      { ext: "TIFF", desc: "TIFF 图片" },
+      { ext: "WEBP", desc: "WebP 图片" },
+    ],
+  },
 ];
 
 const SHORTCUTS = [
@@ -199,6 +211,7 @@ export default function HelpDrawer({ open, onClose, onStartTour }: Props) {
             <Typography.Text type="secondary" style={{ fontSize: 11, lineHeight: 1.7, display: "block" }}>
               💡 <strong>图片型 PDF</strong>（扫描件）因无文字层无法提取内容，将跳过全文 / 语义索引，但文件名仍可检索。<br />
               📦 <strong>ZIP</strong> 支持解析压缩包内的 PDF、Word、Excel、PPT 及文本文件，每个文件最大 20 MB。<br />
+              🖼️ <strong>图片</strong>（JPG/PNG 等）通过系统内置 OCR 引擎提取文字（macOS / Windows），单张限 30 MB。<br />
               📄 <strong>PPT / DOC</strong> 采用字节扫描提取文字，效果可能不如 PPTX / DOCX。
             </Typography.Text>
           </div>
