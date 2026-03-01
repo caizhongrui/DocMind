@@ -197,10 +197,13 @@ mod imp {
             if let Ok(engine) = OcrEngine::TryCreateFromLanguage(&lang) {
                 if let Ok(result) = engine.RecognizeAsync(&bitmap)?.get() {
                     if let Ok(lines) = result.Lines() {
-                        for line in &lines {
-                            if let Ok(t) = line.Text() {
-                                all_text.push_str(&t.to_string());
-                                all_text.push('\n');
+                        let count = lines.Size().unwrap_or(0);
+                        for i in 0..count {
+                            if let Ok(line) = lines.GetAt(i) {
+                                if let Ok(t) = line.Text() {
+                                    all_text.push_str(&t.to_string());
+                                    all_text.push('\n');
+                                }
                             }
                         }
                     }

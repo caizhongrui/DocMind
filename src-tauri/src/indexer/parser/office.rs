@@ -31,7 +31,7 @@ fn extract_xml_text(path: &Path) -> anyhow::Result<String> {
     let mut result = String::new();
 
     for i in 0..archive.len() {
-        let mut entry = archive.by_index(i)?;
+        let entry = archive.by_index(i)?;
         let name = entry.name().to_string();
         let is_content = (name.contains("word/document") || name.contains("ppt/slides/slide"))
             && name.ends_with(".xml");

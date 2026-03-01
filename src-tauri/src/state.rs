@@ -6,7 +6,7 @@ use rusqlite::Connection;
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::AtomicBool,
         Arc, Mutex, RwLock,
     },
 };
