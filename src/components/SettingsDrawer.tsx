@@ -1,4 +1,4 @@
-import { Drawer, Button, List, Typography, Progress, message, Modal, Statistic, InputNumber } from "antd";
+import { Drawer, Button, List, Typography, Progress, message, Modal, Statistic, InputNumber, Tag } from "antd";
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -11,6 +11,7 @@ import {
   DatabaseOutlined,
   BgColorsOutlined,
   GlobalOutlined,
+  FileSearchOutlined,
 } from "@ant-design/icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
@@ -20,6 +21,17 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n/index";
 import { THEME_KEY, type ThemeMode } from "../main";
+
+// ── 文件类型分组定义 ──────────────────────────────────────────────────────────
+const FILE_TYPE_GROUPS = [
+  { label: "文档", types: ["pdf", "docx", "doc", "pptx", "ppt", "rtf"] },
+  { label: "表格", types: ["xlsx", "xls", "csv"] },
+  { label: "图片（OCR）", types: ["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"] },
+  { label: "文本/标记", types: ["txt", "md", "rst"] },
+  { label: "归档", types: ["zip"] },
+] as const;
+
+const ALL_TYPES = FILE_TYPE_GROUPS.flatMap((g) => [...g.types]);
 
 interface IndexProgress {
   total: number;
@@ -55,6 +67,10 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
 
   // ── 定时重索引 ──
   const [reindexInterval, setReindexInterval] = useState(0);
+
+  // ── 文件类型过滤 ──
+  const [enabledTypes, setEnabledTypes] = useState<string[]>([...ALL_TYPES]);
+  const [savingTypes, setSavingTypes] = useState(false);
 
   const checkFolderConflict = (newPath: string, existingFolders: string[]): string | null => {
     const norm = (p: string) => p.endsWith("/") ? p : p + "/";
@@ -94,6 +110,9 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
         .then((s) => setShortcut(s ?? ""))
         .catch(() => {});
       invoke<number>("get_reindex_interval").then(v => setReindexInterval(v)).catch(() => {});
+      invoke<string[]>("get_indexed_types")
+        .then((types) => setEnabledTypes(types))
+        .catch(() => setEnabledTypes([...ALL_TYPES]));
     }
   }, [drawerOpen, loadFolders, loadStats]);
 
@@ -279,6 +298,50 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
       setRebuilding(false);
       setRebuildProgress(null);
     }
+  };
+
+  const toggleType = (ext: string) => {
+    setEnabledTypes((prev) =>
+      prev.includes(ext) ? prev.filter((e) => e !== ext) : [...prev, ext]
+    );
+  };
+
+  const saveTypes = () => {
+    Modal.confirm({
+      title: "保存文件类型配置",
+      content: (
+        <div>
+          <p style={{ marginBottom: 12 }}>是否同时清理已索引的被移除类型文件？</p>
+          <p style={{ fontSize: 12, color: "#64748b" }}>
+            "清理"会从索引中删除已不再启用类型的文件记录，下次搜索不再出现这些文件。
+          </p>
+        </div>
+      ),
+      okText: "清理并保存",
+      cancelText: "仅对后续生效",
+      onOk: async () => {
+        setSavingTypes(true);
+        try {
+          await invoke("set_indexed_types", { types: enabledTypes, cleanupRemoved: true });
+          message.success("文件类型配置已保存，被移除类型记录已清理");
+        } catch (e: unknown) {
+          message.error(`保存失败：${e instanceof Error ? e.message : String(e)}`);
+        } finally {
+          setSavingTypes(false);
+        }
+      },
+      onCancel: async () => {
+        setSavingTypes(true);
+        try {
+          await invoke("set_indexed_types", { types: enabledTypes, cleanupRemoved: false });
+          message.success("文件类型配置已保存");
+        } catch (e: unknown) {
+          message.error(`保存失败：${e instanceof Error ? e.message : String(e)}`);
+        } finally {
+          setSavingTypes(false);
+        }
+      },
+    });
   };
 
   const changeTheme = (mode: ThemeMode) => {
@@ -531,6 +594,86 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
           >
             添加文件夹
           </Button>
+        </div>
+      </div>
+
+      {/* ── 检索文件类型 ── */}
+      <div style={{
+        background: "var(--color-surface)",
+        borderRadius: 10,
+        border: "1px solid var(--color-border)",
+        overflow: "hidden",
+        marginBottom: 16,
+      }}>
+        <div style={{
+          padding: "12px 16px",
+          borderBottom: "1px solid var(--color-border)",
+          display: "flex", alignItems: "center", gap: 7,
+        }}>
+          <FileSearchOutlined style={{ color: "#1677ff", fontSize: 14 }} />
+          <Typography.Text strong style={{ fontSize: 13 }}>检索文件类型</Typography.Text>
+        </div>
+
+        <div style={{ padding: "14px 16px" }}>
+          <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 14, lineHeight: 1.6 }}>
+            只有启用的类型才会被索引和检索。修改后需重新索引已有文件夹才能完全生效。
+          </Typography.Text>
+
+          {FILE_TYPE_GROUPS.map((group) => (
+            <div key={group.label} style={{ marginBottom: 12 }}>
+              <Typography.Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 6 }}>
+                {group.label}
+              </Typography.Text>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {group.types.map((ext) => {
+                  const active = enabledTypes.includes(ext);
+                  return (
+                    <Tag
+                      key={ext}
+                      onClick={() => toggleType(ext)}
+                      color={active ? "blue" : "default"}
+                      style={{
+                        cursor: "pointer",
+                        userSelect: "none",
+                        opacity: active ? 1 : 0.5,
+                        borderRadius: 5,
+                        fontSize: 12,
+                        padding: "1px 8px",
+                      }}
+                    >
+                      {ext}
+                    </Tag>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <Button
+              size="small"
+              onClick={() => setEnabledTypes([...ALL_TYPES])}
+              style={{ fontSize: 12 }}
+            >
+              全选
+            </Button>
+            <Button
+              size="small"
+              onClick={() => setEnabledTypes([])}
+              style={{ fontSize: 12 }}
+            >
+              全不选
+            </Button>
+            <Button
+              type="primary"
+              size="small"
+              loading={savingTypes}
+              onClick={saveTypes}
+              style={{ marginLeft: "auto", fontSize: 12 }}
+            >
+              保存
+            </Button>
+          </div>
         </div>
       </div>
 

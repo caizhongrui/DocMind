@@ -6,6 +6,7 @@ use anyhow::Result;
 use parser::{parse_file, ParseStatus};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter};
+use tantivy::schema::Field;
 
 const EXCLUDE_DIRS: &[&str] = &[
     "node_modules",
@@ -17,7 +18,7 @@ const EXCLUDE_DIRS: &[&str] = &[
     "Thumbs.db",
 ];
 
-const SUPPORTED_EXTS: &[&str] = &[
+pub const SUPPORTED_EXTS: &[&str] = &[
     // 文档
     "pdf", "doc", "docx", "ppt", "pptx", "rtf",
     // 表格
@@ -35,70 +36,111 @@ const MAX_CHUNKS_PER_FILE: usize = 100;
 
 /// Phase 1：全文索引
 /// 返回需要 embedding 的 (file_id, path) 列表（不存 content，避免内存爆炸）
+///
+/// 锁策略（解决索引期间卡死系统的根本原因）：
+///   - parse_file 在锁外执行：OCR / PDF 解析可能耗时数十秒，绝不在锁内运行
+///   - db 锁仅在元数据读写时短暂持有，完成后立即释放
+///   - FTS writer 独立存活，不依赖 fts Mutex；每 BATCH_SIZE 文件 commit 一次
+///   - 每个文件解析后主动 sleep，让出 CPU 给 UI 和其他进程
 pub fn scan_and_index(folder: &Path, state: &AppState, app: &AppHandle) -> Result<Vec<(i64, PathBuf)>> {
-    let files = collect_files(folder);
+    // 从 DB 读取用户配置的启用类型，key 不存在时使用全量默认
+    let enabled_exts: Vec<String> = {
+        let db = state.db.lock().map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
+        db.query_row(
+            "SELECT value FROM settings WHERE key = 'indexed_file_types'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+        .map(|s| s.split(',').map(|e| e.trim().to_string()).filter(|e| !e.is_empty()).collect())
+        .unwrap_or_else(|| SUPPORTED_EXTS.iter().map(|s| s.to_string()).collect())
+    };
+    let files = collect_files(folder, &enabled_exts);
     let total = files.len();
     let mut to_embed: Vec<(i64, PathBuf)> = Vec::new();
 
+    // ── Phase 1a: 孤儿清理（短暂持锁，快速完成）────────────────────────────────
     {
         let db = state.db.lock().map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
         let fts = state.fts.lock().map_err(|_| anyhow::anyhow!("fts lock poisoned"))?;
         let mut writer = fts.writer()?;
 
-        // ── 清理孤儿记录：文件已不在磁盘上，但索引中还有 ──
-        // 每次扫描开始时检查该 folder 下的所有已索引文件，将磁盘上已删除的移除。
-        // 这是防止"删除文件仍能检索到"问题的根本修复。
-        {
-            let escaped = folder.to_string_lossy()
-                .replace('\\', "\\\\")
-                .replace('%', "\\%")
-                .replace('_', "\\_");
-            let like_pattern = format!("{}%", escaped);
-            let mut stmt = db.prepare(
-                "SELECT id, path FROM files WHERE path LIKE ?1 ESCAPE '\\'",
-            )?;
-            let stale: Vec<(i64, String)> = stmt
-                .query_map([&like_pattern], |r| Ok((r.get(0)?, r.get(1)?)))?
-                .flatten()
-                .filter(|(_, p)| !std::path::Path::new(p).exists())
-                .collect();
-            for (id, p) in &stale {
-                let _ = fts.delete_document(&writer, *id as u64);
-                let _ = db.execute("DELETE FROM files WHERE id = ?1", rusqlite::params![id]);
-                println!("[scan] removed stale entry: {p}");
-            }
-            if !stale.is_empty() {
-                let _ = writer.commit(); // commit 不消耗 writer，可继续复用
-            }
+        let escaped = folder.to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let like_pattern = format!("{}%", escaped);
+        let mut stmt = db.prepare(
+            "SELECT id, path FROM files WHERE path LIKE ?1 ESCAPE '\\'",
+        )?;
+        let stale: Vec<(i64, String)> = stmt
+            .query_map([&like_pattern], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .flatten()
+            .filter(|(_, p)| !std::path::Path::new(p).exists())
+            .collect();
+        for (id, p) in &stale {
+            let _ = fts.delete_document(&writer, *id as u64);
+            let _ = db.execute("DELETE FROM files WHERE id = ?1", rusqlite::params![id]);
+            println!("[scan] removed stale entry: {p}");
         }
+        if !stale.is_empty() {
+            writer.commit()?;
+        }
+        // writer 在此 drop → fts 锁释放 → 下面可以创建新 writer
+    }
 
-        for (i, path) in files.iter().enumerate() {
-            let file_name = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
+    // ── Phase 1b: 逐文件解析 + 写入（parse_file 在锁外）───────────────────────
+    // 每 BATCH_SIZE 文件执行一次 Tantivy commit，平衡 segment 数量与内存积压
+    const BATCH_SIZE: usize = 50;
 
-            let _ = app.emit(
-                "index-progress",
-                serde_json::json!({
-                    "total": total,
-                    "done": i + 1,
-                    "current": file_name,
-                }),
-            );
+    // 创建 FTS writer，立即释放 fts 锁（writer 本身是线程安全的独立对象）
+    let mut fts_writer = {
+        let fts = state.fts.lock().map_err(|_| anyhow::anyhow!("fts lock poisoned"))?;
+        fts.index.writer(50_000_000)?
+    };
 
-            let ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-                .to_lowercase();
-            let meta = std::fs::metadata(path)?;
-            let modified = meta
-                .modified()?
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs() as i64;
+    // 缓存 Field 句柄（Field = u32，不可变，无需持锁）
+    let (field_id, field_path, field_name, field_content, field_file_type): (Field, Field, Field, Field, Field) = {
+        let fts = state.fts.lock().map_err(|_| anyhow::anyhow!("fts lock poisoned"))?;
+        (fts.field_id, fts.field_path, fts.field_name, fts.field_content, fts.field_file_type)
+    };
 
+    let mut docs_since_commit: usize = 0;
+
+    for (i, path) in files.iter().enumerate() {
+        let file_name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        let _ = app.emit(
+            "index-progress",
+            serde_json::json!({
+                "total": total,
+                "done": i + 1,
+                "current": file_name,
+            }),
+        );
+
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        let meta = match std::fs::metadata(path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let modified = match meta.modified() {
+            Ok(t) => t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64,
+            Err(_) => continue,
+        };
+
+        // 检查文件是否有变化 + 获取旧 file_id（短暂持有 db 锁，立即释放）
+        let (skip, old_file_id) = {
+            let db = state.db.lock().map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
             let existing_modified: Option<i64> = db
                 .query_row(
                     "SELECT modified FROM files WHERE path = ?1",
@@ -106,29 +148,46 @@ pub fn scan_and_index(folder: &Path, state: &AppState, app: &AppHandle) -> Resul
                     |r| r.get(0),
                 )
                 .ok();
-            if existing_modified == Some(modified) {
-                continue;
-            }
-
-            let old_file_id: Option<i64> = db
+            let old_id: Option<i64> = db
                 .query_row(
                     "SELECT id FROM files WHERE path = ?1",
                     [path.to_string_lossy().as_ref()],
                     |r| r.get(0),
                 )
                 .ok();
-            if let Some(old_id) = old_file_id {
-                fts.delete_document(&writer, old_id as u64)
-                    .map_err(|e| anyhow::anyhow!(e))?;
-            }
+            (existing_modified == Some(modified), old_id)
+        }; // db 锁释放
 
-            let parsed = parse_file(path);
-            let parse_status = match parsed.status {
-                ParseStatus::Ok => "ok",
-                ParseStatus::Partial => "partial",
-                ParseStatus::Failed => "failed",
-            };
+        if skip {
+            continue;
+        }
 
+        // 删除旧 FTS 条目（writer 不需要持有 fts Mutex）
+        if let Some(old_id) = old_file_id {
+            let term = tantivy::Term::from_field_u64(field_id, old_id as u64);
+            fts_writer.delete_term(term);
+        }
+
+        // ★ 核心修复：parse_file 在锁外执行
+        //   OCR（Apple Vision）、PDF 提取、Office 解析均在此处运行，
+        //   期间不持有任何 Mutex，不阻塞 UI 命令或文件监听器。
+        let parsed = parse_file(path);
+        let parse_status = match parsed.status {
+            ParseStatus::Ok => "ok",
+            ParseStatus::Partial => "partial",
+            ParseStatus::Failed => "failed",
+        };
+
+        // 解析后主动让出 CPU：图片 OCR / PDF 是重型操作
+        let is_heavy = matches!(
+            ext.as_str(),
+            "pdf" | "jpg" | "jpeg" | "png" | "bmp" | "tiff" | "tif" | "webp"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(if is_heavy { 80 } else { 5 }));
+
+        // 写入 SQLite（短暂持有 db 锁，立即释放）
+        let file_id: i64 = {
+            let db = state.db.lock().map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
             db.execute(
                 "INSERT OR REPLACE INTO files (path, size, modified, file_type, indexed_at, parse_status)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -141,29 +200,40 @@ pub fn scan_and_index(folder: &Path, state: &AppState, app: &AppHandle) -> Resul
                     parse_status,
                 ],
             )?;
-            let file_id: i64 = db.query_row(
+            db.query_row(
                 "SELECT id FROM files WHERE path = ?1",
                 [path.to_string_lossy().as_ref()],
                 |r| r.get(0),
-            )?;
+            )?
+        }; // db 锁释放
 
-            fts.add_document(
-                &writer,
-                file_id as u64,
-                &path.to_string_lossy(),
-                &file_name,
-                &parsed.content,
-                &ext,
-            )?;
+        // 写入 FTS writer（用缓存的 Field 句柄，不持有 fts Mutex）
+        let mut doc = tantivy::TantivyDocument::default();
+        doc.add_u64(field_id, file_id as u64);
+        doc.add_text(field_path, path.to_string_lossy().as_ref());
+        doc.add_text(field_name, &file_name);
+        doc.add_text(field_content, &parsed.content);
+        doc.add_text(field_file_type, &ext);
+        if let Err(e) = fts_writer.add_document(doc) {
+            eprintln!("[scan] fts add_document error for {}: {e}", path.display());
+        }
+        docs_since_commit += 1;
 
-            // 只记录路径，不缓存 content（避免大量文件内容长时间驻留内存）
-            if parse_status != "failed" && !parsed.content.is_empty() {
-                to_embed.push((file_id, path.clone()));
+        // 每 BATCH_SIZE 文件 commit 一次，避免内存积压
+        if docs_since_commit >= BATCH_SIZE {
+            if let Err(e) = fts_writer.commit() {
+                eprintln!("[scan] fts commit error: {e}");
             }
+            docs_since_commit = 0;
         }
 
-        writer.commit()?;
-    } // db 和 fts 锁在此释放
+        if parse_status != "failed" && !parsed.content.is_empty() {
+            to_embed.push((file_id, path.clone()));
+        }
+    }
+
+    // 最终 commit（剩余未提交的文档）
+    fts_writer.commit()?;
 
     Ok(to_embed)
 }
@@ -291,6 +361,11 @@ pub fn generate_embeddings(to_embed: Vec<(i64, PathBuf)>, state: &AppState, app:
                     eprintln!("[embed] embeddings insert error: {e}");
                 }
             } // db 锁释放
+
+            // 每 5 个 chunk 让出一次 CPU，避免 ONNX 推理持续占满核心
+            if chunk_idx % 5 == 4 {
+                std::thread::sleep(std::time::Duration::from_millis(15));
+            }
         }
 
         // 删除多余的旧 chunk（文件重索引后 chunk 数量可能减少）
@@ -317,8 +392,8 @@ pub fn generate_embeddings(to_embed: Vec<(i64, PathBuf)>, state: &AppState, app:
             serde_json::json!({ "done": idx + 1, "total": total, "current": filename }),
         );
 
-        // 主动让出 CPU，避免后台 embedding 持续抢占系统资源
-        std::thread::sleep(std::time::Duration::from_millis(20));
+        // 文件间让出 CPU，避免后台 embedding 持续抢占系统资源
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
 
     // 所有 chunk 处理完毕后，持久化向量索引，并更新一致性 stamp
@@ -595,7 +670,7 @@ pub fn remove_file_from_index(path: &Path, state: &AppState) {
     println!("[watcher] Removed from index: {} ({} vectors cleaned)", path.display(), chunk_ids.len());
 }
 
-pub fn collect_files(root: &Path) -> Vec<PathBuf> {
+pub fn collect_files(root: &Path, enabled_exts: &[String]) -> Vec<PathBuf> {
     let mut result = Vec::new();
     if let Ok(entries) = std::fs::read_dir(root) {
         for entry in entries.flatten() {
@@ -603,7 +678,7 @@ pub fn collect_files(root: &Path) -> Vec<PathBuf> {
             if path.is_dir() {
                 let name = path.file_name().unwrap_or_default().to_string_lossy();
                 if !EXCLUDE_DIRS.contains(&name.as_ref()) {
-                    result.extend(collect_files(&path));
+                    result.extend(collect_files(&path, enabled_exts));
                 }
             } else if path.is_file() {
                 let ext = path
@@ -611,7 +686,7 @@ pub fn collect_files(root: &Path) -> Vec<PathBuf> {
                     .and_then(|e| e.to_str())
                     .unwrap_or("")
                     .to_lowercase();
-                if SUPPORTED_EXTS.contains(&ext.as_str()) {
+                if enabled_exts.iter().any(|e| e == &ext) {
                     result.push(path);
                 }
             }
@@ -640,7 +715,8 @@ mod tests {
         write_file(tmp.path(), "b.md", "world");
         write_file(tmp.path(), "c.exe", "ignored");
 
-        let files = collect_files(tmp.path());
+        let exts: Vec<String> = vec!["txt".to_string(), "md".to_string()];
+        let files = collect_files(tmp.path(), &exts);
         assert_eq!(files.len(), 2);
         let names: Vec<_> = files
             .iter()
@@ -658,7 +734,8 @@ mod tests {
         write_file(&nm, "a.txt", "should be excluded");
         write_file(tmp.path(), "b.txt", "included");
 
-        let files = collect_files(tmp.path());
+        let exts: Vec<String> = vec!["txt".to_string()];
+        let files = collect_files(tmp.path(), &exts);
         assert_eq!(files.len(), 1);
         assert_eq!(
             files[0].file_name().unwrap().to_str().unwrap(),

@@ -569,7 +569,7 @@ mod tests {
     use super::*;
     use crate::db;
     use crate::indexer::tantivy_index::FtsIndex;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex, RwLock};
     use tempfile::TempDir;
 
     fn make_state(tmp: &TempDir) -> AppState {
@@ -583,8 +583,11 @@ mod tests {
             vector_index: Mutex::new(None),
             embedder: Mutex::new(None),
             llm: Mutex::new(None),
+            llm_loading: Mutex::new(()),
             model_dir: tmp.path().join("models"),
             vi_stamp_path: tmp.path().join("vi_stamp"),
+            llm_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            api_llm_config: Arc::new(RwLock::new(crate::state::ApiLlmConfig::default())),
         }
     }
 

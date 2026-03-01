@@ -64,79 +64,87 @@ pub fn reveal_in_finder(path: String) -> Result<(), String> {
 }
 
 /// 读取文件的原始字节并 base64 编码，供前端渲染 PDF / 图片等二进制格式
-/// 限制：最多读取 10MB（避免大文件阻塞 IPC）
+/// 限制：最多读取 50MB（避免超大文件撑爆 IPC）
 #[tauri::command]
-pub fn read_binary_preview(path: String) -> Result<String, String> {
-    use base64::Engine;
-    use std::io::Read;
+pub async fn read_binary_preview(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        use base64::Engine;
+        use std::io::Read;
 
-    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
-    let max_bytes = (meta.len() as usize).min(10 * 1024 * 1024);
+        let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+        let max_bytes = (meta.len() as usize).min(50 * 1024 * 1024);
 
-    let mut file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
-    let mut buf = vec![0u8; max_bytes];
-    let n = file.read(&mut buf).map_err(|e| e.to_string())?;
-    buf.truncate(n);
+        let mut file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+        let mut buf = vec![0u8; max_bytes];
+        let n = file.read(&mut buf).map_err(|e| e.to_string())?;
+        buf.truncate(n);
 
-    Ok(base64::engine::general_purpose::STANDARD.encode(&buf))
+        Ok(base64::engine::general_purpose::STANDARD.encode(&buf))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
-/// 读取文件文字预览
+/// 读取文件文字预览（在 spawn_blocking 内执行，避免阻塞 Tauri 命令线程）
 /// - `hint`: 可选的提示文本（搜索结果的 snippet），若提供则定位到该文本所在位置展示上下文
 #[tauri::command]
-pub fn read_file_preview(path: String, hint: Option<String>) -> Result<String, String> {
-    use crate::indexer::parser::parse_file;
-    use std::path::Path;
+pub async fn read_file_preview(path: String, hint: Option<String>) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        use crate::indexer::parser::parse_file;
+        use std::path::Path;
 
-    let result = parse_file(Path::new(&path));
-    let content = &result.content;
-    let chars: Vec<char> = content.chars().collect();
-    let total_chars = chars.len();
+        let result = parse_file(Path::new(&path));
+        let content = result.content;
+        let chars: Vec<char> = content.chars().collect();
+        let total_chars = chars.len();
 
-    if total_chars == 0 {
-        return Err("无法读取文件内容".to_string());
-    }
+        if total_chars == 0 {
+            return Err("无法读取文件内容".to_string());
+        }
 
-    // 若有 hint，尝试定位到 hint 所在位置，以该位置为中心展示上下文
-    if let Some(ref hint_text) = hint {
-        // 用前 60 个字符匹配，避免截断后的 snippet 找不到
-        let search_key: String = hint_text.chars().take(60).collect();
-        if !search_key.is_empty() {
-            let content_lower = content.to_lowercase();
-            let key_lower = search_key.to_lowercase();
-            // 先精确匹配，再尝试更短的片段（兼容语义 snippet 与原文略有出入的情况）
-            let byte_pos_opt = content_lower.find(&key_lower)
-                .or_else(|| {
-                    let shorter: String = key_lower.chars().take(30).collect();
-                    content_lower.find(&shorter)
-                });
-            if let Some(byte_pos) = byte_pos_opt {
-                let char_pos = content[..byte_pos].chars().count();
-                // 在匹配位置前后各展示足够的上下文
-                let start_char = char_pos.saturating_sub(300);
-                let end_char = (char_pos + 4000).min(total_chars);
-                let snippet: String = chars[start_char..end_char].iter().collect();
-                let prefix = if start_char > 0 { "......\n\n" } else { "" };
-                let suffix = if end_char < total_chars {
-                    format!("\n\n......（仅展示匹配位置附近内容，文件共 {} 字符）", total_chars)
-                } else {
-                    String::new()
-                };
-                return Ok(format!("{}{}{}", prefix, snippet, suffix));
+        // 若有 hint，尝试定位到 hint 所在位置，以该位置为中心展示上下文
+        if let Some(ref hint_text) = hint {
+            // 用前 60 个字符匹配，避免截断后的 snippet 找不到
+            let search_key: String = hint_text.chars().take(60).collect();
+            if !search_key.is_empty() {
+                let content_lower = content.to_lowercase();
+                let key_lower = search_key.to_lowercase();
+                // 先精确匹配，再尝试更短的片段（兼容语义 snippet 与原文略有出入的情况）
+                let byte_pos_opt = content_lower.find(&key_lower)
+                    .or_else(|| {
+                        let shorter: String = key_lower.chars().take(30).collect();
+                        content_lower.find(&shorter)
+                    });
+                if let Some(byte_pos) = byte_pos_opt {
+                    let char_pos = content[..byte_pos].chars().count();
+                    // 在匹配位置前后各展示足够的上下文
+                    let start_char = char_pos.saturating_sub(300);
+                    let end_char = (char_pos + 4000).min(total_chars);
+                    let snippet: String = chars[start_char..end_char].iter().collect();
+                    let prefix = if start_char > 0 { "......\n\n" } else { "" };
+                    let suffix = if end_char < total_chars {
+                        format!("\n\n......（仅展示匹配位置附近内容，文件共 {} 字符）", total_chars)
+                    } else {
+                        String::new()
+                    };
+                    return Ok(format!("{}{}{}", prefix, snippet, suffix));
+                }
             }
         }
-    }
 
-    // 无 hint 或未找到：展示文件开头内容
-    const PREVIEW_CHARS: usize = 5000;
-    let preview_chars: String = chars.iter().take(PREVIEW_CHARS).collect();
-    let preview = if total_chars > PREVIEW_CHARS {
-        format!("{}\n\n......（内容已截断，文件共 {} 字符）", preview_chars, total_chars)
-    } else {
-        preview_chars
-    };
+        // 无 hint 或未找到：展示文件开头内容
+        const PREVIEW_CHARS: usize = 5000;
+        let preview_chars: String = chars.iter().take(PREVIEW_CHARS).collect();
+        let preview = if total_chars > PREVIEW_CHARS {
+            format!("{}\n\n......（内容已截断，文件共 {} 字符）", preview_chars, total_chars)
+        } else {
+            preview_chars
+        };
 
-    Ok(preview)
+        Ok(preview)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// 将文本写入指定路径的文件（供前端导出功能使用）
@@ -253,5 +261,122 @@ pub fn set_reindex_interval(minutes: u64, state: State<'_, AppState>) -> Result<
         rusqlite::params![minutes.to_string()],
     )
     .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 获取用户配置的可索引文件扩展名列表。
+/// settings 表中 key = "indexed_file_types"，value = 逗号分隔字符串。
+/// key 不存在时返回全量默认列表（向后兼容）。
+#[tauri::command]
+pub fn get_indexed_types(state: State<'_, AppState>) -> Vec<String> {
+    use crate::indexer::SUPPORTED_EXTS;
+
+    let db = match state.db.lock().ok() {
+        Some(d) => d,
+        None => return SUPPORTED_EXTS.iter().map(|s| s.to_string()).collect(),
+    };
+
+    let raw: Option<String> = db
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'indexed_file_types'",
+            [],
+            |r| r.get(0),
+        )
+        .ok();
+
+    match raw {
+        Some(s) if !s.is_empty() => {
+            s.split(',').map(|e| e.trim().to_string()).filter(|e| !e.is_empty()).collect()
+        }
+        _ => SUPPORTED_EXTS.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+/// 保存可索引文件扩展名配置。
+///
+/// `types`: 新的启用扩展名列表
+/// `cleanup_removed`: true = 同时从索引中删除已不再启用类型的文件记录
+#[tauri::command]
+pub fn set_indexed_types(
+    types: Vec<String>,
+    cleanup_removed: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    use crate::indexer::SUPPORTED_EXTS;
+
+    // 1. 读取旧配置（用于计算被移除的类型）
+    let old_types: Vec<String> = {
+        let db = state.db.lock().map_err(|_| "db lock poisoned".to_string())?;
+        db.query_row(
+            "SELECT value FROM settings WHERE key = 'indexed_file_types'",
+            [],
+            |r: &rusqlite::Row| r.get::<_, String>(0),
+        )
+        .ok()
+        .map(|s| s.split(',').map(|e| e.trim().to_string()).filter(|e| !e.is_empty()).collect())
+        .unwrap_or_else(|| SUPPORTED_EXTS.iter().map(|s| s.to_string()).collect())
+    };
+
+    // 2. 保存新配置
+    {
+        let db = state.db.lock().map_err(|_| "db lock poisoned".to_string())?;
+        db.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('indexed_file_types', ?1)",
+            rusqlite::params![types.join(",")],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // 3. 可选：清理被移除类型的索引记录
+    if cleanup_removed {
+        let new_set: std::collections::HashSet<String> = types.iter().cloned().collect();
+        let removed: Vec<String> = old_types.into_iter().filter(|t| !new_set.contains(t)).collect();
+
+        if !removed.is_empty() {
+            // 3a. 查出要删除的 file_id 列表
+            let file_ids: Vec<i64> = {
+                let db = state.db.lock().map_err(|_| "db lock poisoned".to_string())?;
+                let placeholders = removed.iter().enumerate()
+                    .map(|(i, _)| format!("?{}", i + 1))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let sql = format!("SELECT id FROM files WHERE file_type IN ({})", placeholders);
+                let mut stmt = db.prepare(&sql).map_err(|e| e.to_string())?;
+                let params: Vec<&dyn rusqlite::types::ToSql> =
+                    removed.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+                let result: Vec<i64> = stmt.query_map(params.as_slice(), |r| r.get(0))
+                    .map_err(|e| e.to_string())?
+                    .flatten()
+                    .collect();
+                result
+            };
+
+            // 3b. 从 Tantivy FTS 删除对应文档
+            if !file_ids.is_empty() {
+                let fts = state.fts.lock().map_err(|_| "fts lock poisoned".to_string())?;
+                let mut writer = fts.writer().map_err(|e| e.to_string())?;
+                for fid in &file_ids {
+                    let _ = fts.delete_document(&writer, *fid as u64);
+                }
+                writer.commit().map_err(|e| e.to_string())?;
+            }
+
+            // 3c. 从 SQLite 删除记录（CASCADE → chunks → embeddings）
+            {
+                let db = state.db.lock().map_err(|_| "db lock poisoned".to_string())?;
+                let placeholders = removed.iter().enumerate()
+                    .map(|(i, _)| format!("?{}", i + 1))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let sql = format!("DELETE FROM files WHERE file_type IN ({})", placeholders);
+                let params: Vec<&dyn rusqlite::types::ToSql> =
+                    removed.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+                db.execute(&sql, params.as_slice()).map_err(|e| e.to_string())?;
+            }
+
+            println!("[settings] cleaned {} file type(s): {:?}", removed.len(), removed);
+        }
+    }
+
     Ok(())
 }

@@ -3,6 +3,15 @@ use std::path::Path;
 use super::{ParseResult, ParseStatus};
 use super::{pdf, office, text};
 
+/// ZIP 文件名编码解码：优先 UTF-8，失败则尝试 GBK（Windows 压缩包常见）
+fn decode_zip_name(raw: &[u8]) -> String {
+    if let Ok(s) = std::str::from_utf8(raw) {
+        return s.to_string();
+    }
+    let (decoded, _, _) = encoding_rs::GBK.decode(raw);
+    decoded.into_owned()
+}
+
 /// 每个 ZIP entry 最多读取的字节数（二进制格式用此上限提取到临时文件）
 const MAX_ENTRY_BYTES: u64 = 20 * 1024 * 1024; // 20 MB
 /// 所有 entry 合并后的总字符上限
@@ -33,8 +42,9 @@ pub fn parse_zip(path: &Path) -> ParseResult {
     let mut had_content = false;
 
     // 先收集 entry 信息（名称、是否目录），避免借用冲突
+    // 用 name_raw() 获取原始字节，再用 decode_zip_name 处理 GBK 编码
     let entries: Vec<(String, bool)> = (0..archive.len())
-        .filter_map(|i| archive.by_index(i).ok().map(|e| (e.name().to_string(), e.is_dir())))
+        .filter_map(|i| archive.by_index(i).ok().map(|e| (decode_zip_name(e.name_raw()), e.is_dir())))
         .collect();
 
     for (idx, (entry_name, is_dir)) in entries.iter().enumerate() {
@@ -108,11 +118,13 @@ pub fn parse_zip(path: &Path) -> ParseResult {
             if text.is_empty() {
                 continue;
             }
+            // 每个 entry 都加文件名头，让预览和搜索结果都能显示来源文件
             if !all_text.is_empty() {
-                all_text.push_str("\n\n--- ");
-                all_text.push_str(entry_name);
-                all_text.push_str(" ---\n");
+                all_text.push_str("\n\n");
             }
+            all_text.push_str("--- ");
+            all_text.push_str(entry_name);
+            all_text.push_str(" ---\n");
 
             let remaining = MAX_TOTAL_CHARS.saturating_sub(all_text.chars().count());
             if remaining == 0 {

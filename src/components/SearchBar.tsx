@@ -9,9 +9,17 @@ export default function SearchBar({ modelAvailable }: { modelAvailable: boolean 
   const { t } = useTranslation();
   const { query, mode, setQuery, setMode, doSearch, searchHistory, loadSearchHistory, deleteHistoryItem } = useSearchStore();
   const [historyOpen, setHistoryOpen] = useState(false);
+  // 本地输入值，避免受控组件在 IME 组合期间打断输入法
+  const [localQuery, setLocalQuery] = useState(query);
+  const isComposing = useRef(false);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<InputRef>(null);
   const mouseDownInDropdown = useRef(false);
+
+  // 当外部（如历史记录点击）修改 query 时同步到本地
+  useEffect(() => {
+    if (!isComposing.current) setLocalQuery(query);
+  }, [query]);
 
   // Ctrl+K / Cmd+K 聚焦搜索框
   useEffect(() => {
@@ -98,8 +106,20 @@ export default function SearchBar({ modelAvailable }: { modelAvailable: boolean 
         <Input
           id="tour-search-input"
           ref={inputRef}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          value={localQuery}
+          onChange={(e) => {
+            const val = e.target.value;
+            setLocalQuery(val);
+            // IME 组合期间不更新全局 store，避免重渲染打断输入法
+            if (!isComposing.current) setQuery(val);
+          }}
+          onCompositionStart={() => { isComposing.current = true; }}
+          onCompositionEnd={(e) => {
+            isComposing.current = false;
+            const val = (e.target as HTMLInputElement).value;
+            setLocalQuery(val);
+            setQuery(val);
+          }}
           onPressEnter={async () => { setHistoryOpen(false); await handleSearch(); }}
           onFocus={() => { loadSearchHistory(); setHistoryOpen(true); }}
           onBlur={() => {

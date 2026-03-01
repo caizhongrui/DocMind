@@ -8,6 +8,7 @@ import {
   FolderOpenOutlined,
   FileSearchOutlined,
   FileOutlined,
+  FileZipOutlined,
 } from "@ant-design/icons";
 import { useSearchStore } from "../stores/searchStore";
 import { invoke } from "@tauri-apps/api/core";
@@ -16,8 +17,53 @@ import { HighlightText } from "../utils/highlight";
 import OfficePreview from "./OfficePreview";
 
 const PDF_TYPES = ["pdf"];
-const IMAGE_TYPES = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"];
+const IMAGE_TYPES = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "tiff", "tif"];
 const OFFICE_TYPES = ["docx", "xlsx", "pptx", "doc", "xls", "ppt", "csv"];
+// 可索引但无法有意义预览的类型（目前无）
+const NO_PREVIEW_TYPES: string[] = [];
+
+// ZIP 内容分段渲染：将 "--- filename ---" 标记解析为可视化文件头
+function ZipContentView({ text, query }: { text: string; query: string }) {
+  // 按 "--- filename ---" 行拆分（兼容有无前导空行）
+  const parts = text.split(/(?:^|\n)(--- .+ ---)\n/);
+  // parts: [pre, "--- a ---", content_a, "--- b ---", content_b, ...]
+  const sections: { filename?: string; content: string }[] = [];
+  if (parts[0].trim()) sections.push({ content: parts[0].trim() });
+  for (let i = 1; i < parts.length; i += 2) {
+    const filename = parts[i].replace(/^--- | ---$/g, "").trim();
+    const content = (parts[i + 1] ?? "").trim();
+    sections.push({ filename, content });
+  }
+  return (
+    <>
+      {sections.map((sec, i) => (
+        <div key={i} style={{ marginBottom: 12 }}>
+          {sec.filename && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 5,
+              padding: "3px 8px", marginBottom: 6,
+              background: "var(--color-bg-amber)",
+              borderLeft: "3px solid #f59e0b",
+              borderRadius: "0 4px 4px 0",
+              fontSize: 11, fontWeight: 600, color: "#92400e",
+            }}>
+              <FileZipOutlined style={{ fontSize: 11 }} />
+              {sec.filename}
+            </div>
+          )}
+          {sec.content && (
+            <Typography.Paragraph style={{
+              whiteSpace: "pre-wrap", fontSize: 13,
+              lineHeight: 1.75, margin: 0, color: "var(--color-text)",
+            }}>
+              <HighlightText text={sec.content} query={query} />
+            </Typography.Paragraph>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
 
 const MIME_MAP: Record<string, string> = {
   pdf: "application/pdf",
@@ -51,6 +97,9 @@ export default function PreviewPanel() {
     if (!selected) return;
 
     const ft = selected.file_type.toLowerCase();
+
+    // 不支持内容预览的类型直接跳过，展示友好提示
+    if (NO_PREVIEW_TYPES.includes(ft)) return;
 
     if (PDF_TYPES.includes(ft) || IMAGE_TYPES.includes(ft)) {
       setLoading(true);
@@ -119,6 +168,7 @@ export default function PreviewPanel() {
   const isPdf = PDF_TYPES.includes(ft);
   const isImage = IMAGE_TYPES.includes(ft);
   const isOffice = OFFICE_TYPES.includes(ft);
+  const isNoPreview = NO_PREVIEW_TYPES.includes(ft);
   const hasSnippet = !!selected.snippet;
 
   return (
@@ -216,7 +266,14 @@ export default function PreviewPanel() {
         borderRadius: 8,
         background: "var(--color-bg)",
       }}>
-        {isOffice ? (
+        {isNoPreview ? (
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", flex: 1 }}>
+            <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+              此文件类型不支持内容预览
+            </Typography.Text>
+          </div>
+
+        ) : isOffice ? (
           <OfficePreview path={selected.path} fileType={ft} />
 
         ) : loading ? (
@@ -249,11 +306,16 @@ export default function PreviewPanel() {
 
         ) : (
           <div style={{ flex: 1, overflow: "auto", padding: "10px 14px" }}>
-            <Typography.Paragraph
-              style={{ whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.75, margin: 0, color: "var(--color-text)" }}
-            >
-              <HighlightText text={textContent} query={query} />
-            </Typography.Paragraph>
+            {ft === "zip"
+              ? <ZipContentView text={textContent} query={query} />
+              : (
+                <Typography.Paragraph
+                  style={{ whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.75, margin: 0, color: "var(--color-text)" }}
+                >
+                  <HighlightText text={textContent} query={query} />
+                </Typography.Paragraph>
+              )
+            }
           </div>
         )}
       </div>

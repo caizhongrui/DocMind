@@ -415,6 +415,8 @@ pub fn run() {
             commands::settings::check_shortcut_conflict,
             commands::settings::get_reindex_interval,
             commands::settings::set_reindex_interval,
+            commands::settings::get_indexed_types,
+            commands::settings::set_indexed_types,
             commands::llm::summarize_documents,
         ])
         .run(tauri::generate_context!())

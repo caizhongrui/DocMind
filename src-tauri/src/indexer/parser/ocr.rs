@@ -221,3 +221,75 @@ mod imp {
         Err(anyhow::anyhow!("OCR not supported on this platform"))
     }
 }
+
+// ── 测试 ──────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    /// 测试图片 OCR：识别含英文 + 中文文字的 PNG。
+    /// 图片位于 tests/fixtures/ocr_test.png，由 Python PIL 生成。
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    fn test_ocr_image_with_text() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/ocr_test.png");
+
+        assert!(fixture.exists(), "测试图片不存在: {}", fixture.display());
+
+        let img = image::open(&fixture).expect("无法打开测试图片");
+        let result = ocr_image(&img).expect("OCR 调用失败");
+
+        println!("[OCR 结果]\n{}", result);
+
+        // 验证识别到关键词（Apple Vision 识别结果可能有轻微差异，用宽松匹配）
+        let lower = result.to_lowercase();
+        assert!(
+            lower.contains("hello") || lower.contains("ocr") || lower.contains("123"),
+            "OCR 未识别到英文内容，实际结果: {:?}",
+            result
+        );
+    }
+
+    /// 测试 OCR 对全白空图片（无文字）的处理：应返回空字符串。
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    fn test_ocr_blank_image_returns_empty() {
+        let blank = image::DynamicImage::ImageRgb8(
+            image::RgbImage::new(100, 100),
+        );
+        // 白色空图片，OCR 应返回空字符串（不报错）
+        match ocr_image(&blank) {
+            Ok(text) => assert!(
+                text.trim().is_empty(),
+                "空图片 OCR 应返回空字符串，实际: {:?}",
+                text
+            ),
+            Err(_) => {} // 部分平台对全白图片可能直接返回 Err，也可接受
+        }
+    }
+
+    /// 测试 parse_image 集成：通过文件路径调用完整解析流程。
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    fn test_parse_image_integration() {
+        use crate::indexer::parser::image::parse_image;
+        use crate::indexer::parser::ParseStatus;
+
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/ocr_test.png");
+
+        if !fixture.exists() {
+            println!("跳过集成测试：测试图片不存在");
+            return;
+        }
+
+        let result = parse_image(&fixture);
+        println!("[parse_image 结果] status={:?}, content={:?}", result.status, result.content);
+
+        assert_eq!(result.status, ParseStatus::Ok, "parse_image 应返回 Ok 状态");
+        assert!(!result.content.trim().is_empty(), "parse_image content 不应为空");
+    }
+}

@@ -162,7 +162,7 @@ mod tests {
     fn test_add_and_commit_document() {
         let tmp = TempDir::new().unwrap();
         let idx = FtsIndex::open_or_create(tmp.path()).unwrap();
-        let writer = idx.writer().unwrap();
+        let mut writer = idx.writer().unwrap();
         idx.add_document(&writer, 1, "/tmp/test.txt", "test.txt", "hello world", "txt")
             .unwrap();
         writer.commit().unwrap();
@@ -173,7 +173,7 @@ mod tests {
         // 验证"违约"能搜到"违约金"
         let tmp = TempDir::new().unwrap();
         let idx = FtsIndex::open_or_create(tmp.path()).unwrap();
-        let writer = idx.writer().unwrap();
+        let mut writer = idx.writer().unwrap();
         idx.add_document(
             &writer,
             1,
