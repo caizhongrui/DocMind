@@ -71,6 +71,14 @@ export default function SearchBar({ modelAvailable }: { modelAvailable: boolean 
     },
   ];
 
+  const pickHistory = (q: string) => {
+    setQuery(q);
+    setLocalQuery(q);
+    setHistoryOpen(false);
+    inputRef.current?.blur();
+    setTimeout(() => doSearch(), 0);
+  };
+
   const historyItems = searchHistory
     .filter((h) => h.mode === mode)
     .slice(0, 5)
@@ -78,14 +86,22 @@ export default function SearchBar({ modelAvailable }: { modelAvailable: boolean 
       key: String(h.id),
       label: (
         <div
-          onMouseDown={() => {
+          onMouseDown={(e) => {
             mouseDownInDropdown.current = true;
+            // Fire selection on mousedown so it happens before input blur,
+            // and preventDefault keeps the input from losing focus mid-click.
+            const target = e.target as HTMLElement;
+            if (target.closest("[data-history-delete]")) return;
+            e.preventDefault();
+            pickHistory(h.query);
           }}
-          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", minWidth: 220 }}
+          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", minWidth: 220, cursor: "pointer" }}
         >
           <span style={{ fontSize: 13 }}>{h.query}</span>
           <DeleteOutlined
+            data-history-delete
             style={{ fontSize: 11, color: "var(--color-text-muted)", marginLeft: 8 }}
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
               deleteHistoryItem(h.id);
@@ -93,11 +109,6 @@ export default function SearchBar({ modelAvailable }: { modelAvailable: boolean 
           />
         </div>
       ),
-      onClick: () => {
-        setQuery(h.query);
-        setHistoryOpen(false);
-        setTimeout(() => doSearch(), 0);
-      },
     }));
 
   return (
