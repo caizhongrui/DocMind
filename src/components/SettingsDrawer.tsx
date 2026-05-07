@@ -1,4 +1,4 @@
-import { Drawer, Button, List, Typography, Progress, message, Modal, Statistic, InputNumber, Tag } from "antd";
+import { Drawer, Button, List, Typography, Progress, message, Modal, Statistic, InputNumber } from "antd";
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -418,7 +418,7 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
     <Drawer
       title={
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <SettingOutlined style={{ color: "#1677ff" }} />
+          <SettingOutlined style={{ color: "var(--color-text-secondary)" }} />
           <span>设置</span>
         </div>
       }
@@ -427,31 +427,30 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
       width={480}
       styles={{
         body: { padding: "20px 24px", background: "var(--color-bg)" },
+        header: { borderBottom: "1px solid var(--color-border)" },
       }}
     >
       {/* ── 监听文件夹 ── */}
       <div style={{
         background: "var(--color-surface)",
-        borderRadius: 10,
+        borderRadius: 8,
         border: "1px solid var(--color-border)",
         marginBottom: 16,
         overflow: "hidden",
       }}>
         <div style={{
-          padding: "12px 16px",
+          padding: "10px 14px",
           borderBottom: "1px solid var(--color-border)",
-          display: "flex", alignItems: "center", gap: 7,
+          display: "flex", alignItems: "center", gap: 8,
         }}>
-          <FolderOutlined style={{ color: "#1677ff", fontSize: 14 }} />
-          <Typography.Text strong style={{ fontSize: 13 }}>
-            已监听的文件夹
-          </Typography.Text>
+          <FolderOutlined style={{ color: "var(--color-text-secondary)", fontSize: 13 }} />
+          <span className="section-label">Watched Folders</span>
           <Button
             type="text"
             size="small"
             icon={<ReloadOutlined />}
             onClick={loadStats}
-            style={{ marginLeft: "auto", color: "#94a3b8", padding: "0 4px" }}
+            style={{ marginLeft: "auto", color: "var(--color-text-muted)", padding: "0 4px" }}
             title="刷新统计"
           />
         </div>
@@ -463,18 +462,19 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
             borderBottom: "1px solid var(--color-border)",
           }}>
             {[
-              { icon: <FileTextOutlined style={{ color: "#1677ff" }} />, label: "文件数", value: stats.file_count.toLocaleString() },
-              { icon: <DatabaseOutlined style={{ color: "#7c3aed" }} />, label: "文本块", value: stats.chunk_count.toLocaleString() },
-              { icon: <DatabaseOutlined style={{ color: "#16a34a" }} />, label: "索引大小", value: `${stats.db_size_mb.toFixed(1)} MB` },
+              { icon: <FileTextOutlined />, label: "文件数", value: stats.file_count.toLocaleString() },
+              { icon: <DatabaseOutlined />, label: "文本块", value: stats.chunk_count.toLocaleString() },
+              { icon: <DatabaseOutlined />, label: "索引大小", value: `${stats.db_size_mb.toFixed(1)} MB` },
             ].map((item, i) => (
               <div key={i} style={{
                 flex: 1, textAlign: "center", padding: "10px 4px",
                 borderRight: i < 2 ? "1px solid var(--color-border)" : "none",
+                color: "var(--color-text-secondary)",
               }}>
-                <div style={{ marginBottom: 2 }}>{item.icon}</div>
+                <div style={{ marginBottom: 4, fontSize: 13 }}>{item.icon}</div>
                 <Statistic
                   value={item.value}
-                  valueStyle={{ fontSize: 14, fontWeight: 600, color: "#1a1d23" }}
+                  valueStyle={{ fontSize: 14, fontWeight: 600, color: "var(--color-text)", fontFamily: "var(--font-mono)" }}
                 />
                 <Typography.Text type="secondary" style={{ fontSize: 10 }}>{item.label}</Typography.Text>
               </div>
@@ -485,7 +485,7 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
         {/* 索引进度 */}
         {indexing && (
           <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--color-border)", background: "var(--color-primary-bg)" }}>
-            <Typography.Text style={{ fontSize: 12, color: "#1677ff" }}>
+            <Typography.Text style={{ fontSize: 12, color: "var(--color-primary)" }}>
               {progress ? `正在索引：${progress.current}` : "正在扫描文件..."}
             </Typography.Text>
             <Progress
@@ -499,10 +499,10 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
 
         <div
           style={{
-            border: isDragOver ? "2px dashed #1677ff" : "2px dashed transparent",
-            borderRadius: 8,
+            border: isDragOver ? "2px dashed var(--color-primary)" : "2px dashed transparent",
+            borderRadius: 6,
             padding: 4,
-            transition: "border-color 0.2s",
+            transition: "border-color var(--duration-fast) var(--easing-out)",
             minHeight: 60,
             position: "relative",
           }}
@@ -514,10 +514,10 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              background: "rgba(22,119,255,0.05)",
-              borderRadius: 8,
+              background: "var(--color-primary-bg)",
+              borderRadius: 6,
               fontSize: 12,
-              color: "#1677ff",
+              color: "var(--color-primary)",
               pointerEvents: "none",
               zIndex: 1,
             }}>
@@ -561,17 +561,11 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
                   ]}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
-                    <div style={{
-                      width: 28, height: 28, borderRadius: 7,
-                      background: "#fffbeb",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      flexShrink: 0,
-                    }}>
-                      <FolderOutlined style={{ color: "#f59e0b", fontSize: 14 }} />
-                    </div>
+                    <FolderOutlined style={{ color: "var(--color-text-secondary)", fontSize: 14, flexShrink: 0 }} />
                     <Typography.Text
                       ellipsis={{ tooltip: folder }}
-                      style={{ fontSize: 13, color: "var(--color-text)" }}
+                      className="mono"
+                      style={{ fontSize: 12, color: "var(--color-text)" }}
                     >
                       {folder}
                     </Typography.Text>
@@ -600,18 +594,18 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
       {/* ── 检索文件类型 ── */}
       <div style={{
         background: "var(--color-surface)",
-        borderRadius: 10,
+        borderRadius: 8,
         border: "1px solid var(--color-border)",
         overflow: "hidden",
         marginBottom: 16,
       }}>
         <div style={{
-          padding: "12px 16px",
+          padding: "10px 14px",
           borderBottom: "1px solid var(--color-border)",
-          display: "flex", alignItems: "center", gap: 7,
+          display: "flex", alignItems: "center", gap: 8,
         }}>
-          <FileSearchOutlined style={{ color: "#1677ff", fontSize: 14 }} />
-          <Typography.Text strong style={{ fontSize: 13 }}>检索文件类型</Typography.Text>
+          <FileSearchOutlined style={{ color: "var(--color-text-secondary)", fontSize: 13 }} />
+          <span className="section-label">File Types</span>
         </div>
 
         <div style={{ padding: "14px 16px" }}>
@@ -628,21 +622,21 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
                 {group.types.map((ext) => {
                   const active = enabledTypes.includes(ext);
                   return (
-                    <Tag
+                    <button
                       key={ext}
                       onClick={() => toggleType(ext)}
-                      color={active ? "blue" : "default"}
+                      className={active ? "chip chip-primary" : "chip"}
                       style={{
                         cursor: "pointer",
-                        userSelect: "none",
-                        opacity: active ? 1 : 0.5,
-                        borderRadius: 5,
-                        fontSize: 12,
-                        padding: "1px 8px",
+                        fontFamily: "var(--font-mono)",
+                        height: 22,
+                        padding: "0 8px",
+                        fontSize: 11,
+                        opacity: active ? 1 : 0.6,
                       }}
                     >
                       {ext}
-                    </Tag>
+                    </button>
                   );
                 })}
               </div>
@@ -680,19 +674,17 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
       {/* ── 语义索引 ── */}
       <div style={{
         background: "var(--color-surface)",
-        borderRadius: 10,
+        borderRadius: 8,
         border: "1px solid var(--color-border)",
         overflow: "hidden",
       }}>
         <div style={{
-          padding: "12px 16px",
+          padding: "10px 14px",
           borderBottom: "1px solid var(--color-border)",
-          display: "flex", alignItems: "center", gap: 7,
+          display: "flex", alignItems: "center", gap: 8,
         }}>
-          <ThunderboltOutlined style={{ color: "#7c3aed", fontSize: 14 }} />
-          <Typography.Text strong style={{ fontSize: 13 }}>
-            语义索引
-          </Typography.Text>
+          <ThunderboltOutlined style={{ color: "var(--color-text-secondary)", fontSize: 13 }} />
+          <span className="section-label">Semantic Index</span>
         </div>
 
         <div style={{ padding: "14px 16px" }}>
@@ -702,7 +694,7 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
 
           {rebuilding && (
             <div style={{ marginBottom: 14 }}>
-              <Typography.Text style={{ fontSize: 12, color: "#7c3aed" }}>
+              <Typography.Text style={{ fontSize: 12, color: "var(--color-primary)" }}>
                 {rebuildProgress
                   ? `正在生成向量：${rebuildProgress.current}（${rebuildProgress.done}/${rebuildProgress.total}）`
                   : "正在初始化..."}
@@ -711,7 +703,6 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
                 percent={rebuildProgress?.total ? Math.round((rebuildProgress.done / rebuildProgress.total) * 100) : 0}
                 size="small"
                 status="active"
-                strokeColor="#7c3aed"
                 style={{ marginTop: 6, marginBottom: 0 }}
               />
             </div>
@@ -732,18 +723,18 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
       {/* ── 外观 ── */}
       <div style={{
         background: "var(--color-surface)",
-        borderRadius: 10,
+        borderRadius: 8,
         border: "1px solid var(--color-border)",
         overflow: "hidden",
         marginTop: 16,
       }}>
         <div style={{
-          padding: "12px 16px",
+          padding: "10px 14px",
           borderBottom: "1px solid var(--color-border)",
-          display: "flex", alignItems: "center", gap: 7,
+          display: "flex", alignItems: "center", gap: 8,
         }}>
-          <BgColorsOutlined style={{ color: "#f59e0b", fontSize: 14 }} />
-          <Typography.Text strong style={{ fontSize: 13 }}>外观</Typography.Text>
+          <BgColorsOutlined style={{ color: "var(--color-text-secondary)", fontSize: 13 }} />
+          <span className="section-label">Appearance</span>
         </div>
         <div style={{ padding: "14px 16px" }}>
           <div style={{ display: "flex", gap: 6 }}>
@@ -751,50 +742,56 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
               { key: "system", label: t("settings.theme_system") },
               { key: "light",  label: t("settings.theme_light") },
               { key: "dark",   label: t("settings.theme_dark") },
-            ] as { key: ThemeMode; label: string }[]).map((opt) => (
-              <button
-                key={opt.key}
-                onClick={() => changeTheme(opt.key)}
-                style={{
-                  flex: 1,
-                  padding: "7px 0",
-                  borderRadius: 8,
-                  border: `1px solid ${themeMode === opt.key ? "#1677ff" : "var(--color-border)"}`,
-                  background: themeMode === opt.key ? "var(--color-selected)" : "var(--color-bg)",
-                  color: themeMode === opt.key ? "#1677ff" : "var(--color-text-secondary)",
-                  fontSize: 12,
-                  fontWeight: themeMode === opt.key ? 600 : 400,
-                  cursor: "pointer",
-                  transition: "all 0.15s",
-                }}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-          {/* 语言切换 */}
-          <div style={{ marginTop: 12 }}>
-            <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
-              {t("settings.language")} / Language
-            </Typography.Text>
-            <div style={{ display: "flex", gap: 6 }}>
-              {[{ key: "zh", label: "中文" }, { key: "en", label: "English" }].map(opt => (
+            ] as { key: ThemeMode; label: string }[]).map((opt) => {
+              const active = themeMode === opt.key;
+              return (
                 <button
                   key={opt.key}
-                  onClick={() => i18n.changeLanguage(opt.key)}
+                  onClick={() => changeTheme(opt.key)}
                   style={{
-                    padding: "4px 12px",
+                    flex: 1,
+                    padding: "7px 0",
                     borderRadius: 6,
-                    border: "1px solid var(--color-border)",
-                    background: "var(--color-bg)",
-                    color: "var(--color-text)",
-                    cursor: "pointer",
+                    border: `1px solid ${active ? "var(--color-primary)" : "var(--color-border)"}`,
+                    background: active ? "var(--color-primary-bg)" : "var(--color-surface-elevated)",
+                    color: active ? "var(--color-primary)" : "var(--color-text-secondary)",
                     fontSize: 12,
+                    fontWeight: active ? 600 : 500,
+                    cursor: "pointer",
+                    transition: "all var(--duration-fast) var(--easing-out)",
                   }}
                 >
                   {opt.label}
                 </button>
-              ))}
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
+              {t("settings.language")} / Language
+            </Typography.Text>
+            <div style={{ display: "flex", gap: 6 }}>
+              {[{ key: "zh", label: "中文" }, { key: "en", label: "English" }].map((opt) => {
+                const active = i18n.language?.startsWith(opt.key);
+                return (
+                  <button
+                    key={opt.key}
+                    onClick={() => i18n.changeLanguage(opt.key)}
+                    style={{
+                      padding: "4px 12px",
+                      borderRadius: 6,
+                      border: `1px solid ${active ? "var(--color-primary)" : "var(--color-border)"}`,
+                      background: active ? "var(--color-primary-bg)" : "var(--color-surface-elevated)",
+                      color: active ? "var(--color-primary)" : "var(--color-text)",
+                      cursor: "pointer",
+                      fontSize: 12,
+                      fontWeight: active ? 600 : 500,
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -803,18 +800,18 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
       {/* ── 全局快捷键 ── */}
       <div style={{
         background: "var(--color-surface)",
-        borderRadius: 10,
+        borderRadius: 8,
         border: "1px solid var(--color-border)",
         overflow: "hidden",
         marginTop: 16,
       }}>
         <div style={{
-          padding: "12px 16px",
+          padding: "10px 14px",
           borderBottom: "1px solid var(--color-border)",
-          display: "flex", alignItems: "center", gap: 7,
+          display: "flex", alignItems: "center", gap: 8,
         }}>
-          <GlobalOutlined style={{ color: "#1677ff", fontSize: 14 }} />
-          <Typography.Text strong style={{ fontSize: 13 }}>全局快捷键</Typography.Text>
+          <GlobalOutlined style={{ color: "var(--color-text-secondary)", fontSize: 13 }} />
+          <span className="section-label">Global Shortcut</span>
         </div>
         <div style={{ padding: "14px 16px" }}>
           <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 12, lineHeight: 1.6 }}>
@@ -829,12 +826,13 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
                 onBlur={() => setRecordingShortcut(false)}
                 style={{
                   flex: 1,
-                  border: "2px solid #1677ff",
-                  borderRadius: 8,
+                  border: "1px solid var(--color-primary)",
+                  boxShadow: "0 0 0 2px var(--color-primary-bg)",
+                  borderRadius: 6,
                   padding: "6px 12px",
                   fontSize: 13,
-                  color: "#1677ff",
-                  background: "#eff6ff",
+                  color: "var(--color-primary)",
+                  background: "var(--color-primary-bg)",
                   cursor: "text",
                   outline: "none",
                   textAlign: "center",
@@ -848,14 +846,14 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
                 style={{
                   flex: 1,
                   border: "1px solid var(--color-border)",
-                  borderRadius: 8,
+                  borderRadius: 6,
                   padding: "6px 12px",
                   fontSize: 13,
                   color: shortcut ? "var(--color-text)" : "var(--color-text-muted)",
-                  background: "var(--color-bg)",
+                  background: "var(--color-surface-elevated)",
                   cursor: "pointer",
                   textAlign: "center",
-                  fontFamily: shortcut ? '"SFMono-Regular", Menlo, monospace' : "inherit",
+                  fontFamily: shortcut ? "var(--font-mono)" : "inherit",
                   fontWeight: shortcut ? 600 : 400,
                 }}
               >
@@ -866,7 +864,7 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
               <Button
                 size="small"
                 type="text"
-                style={{ color: "#94a3b8", fontSize: 12 }}
+                style={{ color: "var(--color-text-muted)", fontSize: 12 }}
                 onClick={() => setShortcut("")}
               >
                 清除
@@ -878,7 +876,7 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
               loading={savingShortcut}
               disabled={recordingShortcut}
               onClick={saveShortcut}
-              style={{ borderRadius: 8 }}
+              style={{ borderRadius: 6 }}
             >
               保存
             </Button>
@@ -887,10 +885,10 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
       </div>
 
       {/* ── 定时重索引 ── */}
-      <div style={{ marginBottom: 0, marginTop: 16, borderRadius: 10, border: "1px solid var(--color-border)", overflow: "hidden" }}>
-        <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)", display: "flex", alignItems: "center", gap: 8 }}>
-          <ReloadOutlined style={{ color: "#64748b" }} />
-          <Typography.Text strong style={{ fontSize: 13 }}>定时重索引</Typography.Text>
+      <div style={{ marginBottom: 0, marginTop: 16, borderRadius: 8, border: "1px solid var(--color-border)", overflow: "hidden" }}>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)", display: "flex", alignItems: "center", gap: 8 }}>
+          <ReloadOutlined style={{ color: "var(--color-text-secondary)", fontSize: 13 }} />
+          <span className="section-label">Auto Re-index</span>
         </div>
         <div style={{ padding: "14px 16px" }}>
           <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 12 }}>
@@ -921,20 +919,18 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
       {/* ── 数据管理 ── */}
       <div style={{
         background: "var(--color-surface)",
-        borderRadius: 10,
-        border: "1px solid #fee2e2",
+        borderRadius: 8,
+        border: "1px solid var(--color-border)",
         overflow: "hidden",
         marginTop: 16,
       }}>
         <div style={{
-          padding: "12px 16px",
-          borderBottom: "1px solid #fee2e2",
-          display: "flex", alignItems: "center", gap: 7,
+          padding: "10px 14px",
+          borderBottom: "1px solid var(--color-border)",
+          display: "flex", alignItems: "center", gap: 8,
         }}>
-          <ClearOutlined style={{ color: "#ef4444", fontSize: 14 }} />
-          <Typography.Text strong style={{ fontSize: 13, color: "#ef4444" }}>
-            数据管理
-          </Typography.Text>
+          <ClearOutlined style={{ color: "#ef4444", fontSize: 13 }} />
+          <span className="section-label" style={{ color: "#ef4444" }}>Danger Zone</span>
         </div>
         <div style={{ padding: "14px 16px" }}>
           <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 12, lineHeight: 1.6 }}>
@@ -946,7 +942,7 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
             loading={clearing}
             disabled={indexing !== null || rebuilding}
             onClick={clearAllIndex}
-            style={{ borderRadius: 8 }}
+            style={{ borderRadius: 6 }}
           >
             一键清除所有索引
           </Button>

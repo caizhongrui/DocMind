@@ -181,7 +181,7 @@ export default function OfficePreview({ path, fileType }: Props) {
     return (
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100%", flexDirection: "column", gap: 12 }}>
         <Spin />
-        <span style={{ fontSize: 12, color: "#999" }}>正在解析文档...</span>
+        <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>正在解析文档...</span>
       </div>
     );
   }
@@ -223,29 +223,32 @@ export default function OfficePreview({ path, fileType }: Props) {
               display: "flex",
               gap: 4,
               padding: "6px 8px",
-              borderBottom: "1px solid #f0f0f0",
+              borderBottom: "1px solid var(--color-border)",
               flexShrink: 0,
               flexWrap: "wrap",
+              background: "var(--color-surface)",
             }}
           >
-            {xlsxSheets.map((sheet, i) => (
-              <button
-                key={sheet.name}
-                onClick={() => setActiveSheet(i)}
-                style={{
-                  padding: "2px 10px",
-                  border: activeSheet === i ? "1px solid #1677ff" : "1px solid #d9d9d9",
-                  borderRadius: 4,
-                  background: activeSheet === i ? "#e6f4ff" : "#fff",
-                  color: activeSheet === i ? "#1677ff" : "#595959",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  lineHeight: "20px",
-                }}
-              >
-                {sheet.name}
-              </button>
-            ))}
+            {xlsxSheets.map((sheet, i) => {
+              const active = activeSheet === i;
+              return (
+                <button
+                  key={sheet.name}
+                  onClick={() => setActiveSheet(i)}
+                  className={active ? "chip chip-primary" : "chip"}
+                  style={{
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    height: 22,
+                    padding: "0 10px",
+                    fontSize: 12,
+                    fontWeight: active ? 600 : 500,
+                  }}
+                >
+                  {sheet.name}
+                </button>
+              );
+            })}
           </div>
         )}
         <iframe
@@ -262,27 +265,26 @@ export default function OfficePreview({ path, fileType }: Props) {
     if (pptxSlides.length === 0)
       return <Empty description="未找到幻灯片内容" style={{ marginTop: 40 }} />;
     return (
-      <div style={{ overflow: "auto", padding: "8px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ overflow: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
         {pptxSlides.map((slide) => (
           <div
             key={slide.index}
             style={{
-              background: "#fff",
-              border: "1px solid #e8e8e8",
+              background: "var(--color-surface)",
+              border: "1px solid var(--color-border)",
               borderRadius: 8,
               padding: "14px 18px",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
             }}
           >
-            <div style={{ fontSize: 10, color: "#bbb", marginBottom: 6 }}>
-              第 {slide.index} 页
+            <div className="mono" style={{ fontSize: 10, color: "var(--color-text-muted)", marginBottom: 6 }}>
+              {String(slide.index).padStart(2, "0")} / {String(pptxSlides.length).padStart(2, "0")}
             </div>
             {slide.title && (
               <div
                 style={{
                   fontSize: 15,
-                  fontWeight: 700,
-                  color: "#1677ff",
+                  fontWeight: 600,
+                  color: "var(--color-text)",
                   marginBottom: slide.bullets.length > 0 ? 8 : 0,
                   lineHeight: 1.4,
                 }}
@@ -293,7 +295,7 @@ export default function OfficePreview({ path, fileType }: Props) {
             {slide.bullets.length > 0 && (
               <ul style={{ margin: 0, paddingLeft: 18 }}>
                 {slide.bullets.map((b, i) => (
-                  <li key={i} style={{ fontSize: 13, color: "#444", lineHeight: 1.65, marginBottom: 2 }}>
+                  <li key={i} style={{ fontSize: 13, color: "var(--color-text-secondary)", lineHeight: 1.65, marginBottom: 2 }}>
                     {b}
                   </li>
                 ))}
