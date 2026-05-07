@@ -163,6 +163,20 @@ export default function ResultList() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (filtered.length === 0) return;
+      // Don't hijack arrows/Enter when the user is typing in an input,
+      // textarea, contenteditable, or the search box itself.
+      const t = e.target as HTMLElement | null;
+      if (t) {
+        const tag = t.tagName;
+        if (
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          t.isContentEditable ||
+          t.closest('[contenteditable="true"]')
+        ) {
+          return;
+        }
+      }
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setFocusedIndex((prev) => {
