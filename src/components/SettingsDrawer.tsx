@@ -26,7 +26,6 @@ import { THEME_KEY, type ThemeMode } from "../main";
 const FILE_TYPE_GROUPS = [
   { label: "文档", types: ["pdf", "docx", "doc", "pptx", "ppt", "rtf"] },
   { label: "表格", types: ["xlsx", "xls", "csv"] },
-  { label: "图片（OCR）", types: ["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"] },
   { label: "文本/标记", types: ["txt", "md", "rst"] },
   { label: "归档", types: ["zip"] },
 ] as const;
