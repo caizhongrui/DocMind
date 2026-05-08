@@ -73,7 +73,11 @@ function render(s: string): string {
 
   <section class="bg-white">
     <div class="mx-auto max-w-3xl px-6 py-16">
-      <div class="space-y-12">
+      <!-- Server-rendered list (build-time snapshot, instant paint, SEO).
+           A small client script below replaces it with a fresh fetch
+           from doc-api so newly-published versions appear without a
+           portal redeploy. -->
+      <div id="release-list" class="space-y-12">
         {releases.map((r, idx) => (
           <article class="border-l-2 border-ink-200 pl-6">
             <div class="flex items-center gap-3">
@@ -98,3 +102,70 @@ function render(s: string): string {
   .release-notes p { font-size: 14px; line-height: 1.7; margin: 6px 0; }
   .release-notes code { background: #f1f5f9; padding: 1px 5px; border-radius: 3px; font-size: 12px; font-family: var(--font-mono); }
 </style>
+
+<!--
+  Live refresh: fetches the latest /api/v1/releases/public and re-renders
+  the timeline with whatever the server has. The build-time snapshot above
+  serves as instant fallback content + the rendering target on first paint.
+-->
+<script is:inline>
+(async () => {
+  function tinyMd(src) {
+    const render = (s) =>
+      s
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/`([^`]+)`/g, "<code>$1</code>");
+    return src
+      .split("\n")
+      .map((raw) => {
+        const t = raw.trim();
+        if (t.startsWith("- ")) return `<li>${render(t.slice(2))}</li>`;
+        if (t.startsWith("* ")) return `<li>${render(t.slice(2))}</li>`;
+        if (/^#+\s/.test(t)) return `<h4>${render(t.replace(/^#+\s/, ""))}</h4>`;
+        if (/^\*\*[^*]+\*\*$/.test(t)) return `<h4>${t.replace(/\*\*/g, "")}</h4>`;
+        if (t === "") return "";
+        return `<p>${render(t)}</p>`;
+      })
+      .join("\n")
+      .replace(/(<li>.*?<\/li>(\n)?)+/gs, (m) => `<ul>${m}</ul>`);
+  }
+
+  function fmt(iso) {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${d.getFullYear()}-${m}-${day}`;
+  }
+
+  function escapeAttr(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  try {
+    const r = await fetch("https://doc-api.boyobang.com/api/v1/releases/public", {
+      cache: "no-store",
+    });
+    if (!r.ok) return;
+    const fetched = await r.json();
+    if (!Array.isArray(fetched) || fetched.length === 0) return;
+
+    const html = fetched
+      .map((rel, i) => `
+        <article class="border-l-2 border-ink-200 pl-6">
+          <div class="flex items-center gap-3">
+            <span class="font-mono text-2xl font-bold text-ink-900">v${escapeAttr(rel.version)}</span>
+            <span class="font-mono text-xs text-ink-400">${escapeAttr(fmt(rel.published_at))}</span>
+            ${i === 0 ? '<span class="rounded-full bg-primary-100 px-2 py-0.5 text-xs font-medium text-primary-700">最新</span>' : ""}
+          </div>
+          <div class="release-notes prose prose-sm mt-4 max-w-none text-ink-700">${tinyMd(rel.notes || "")}</div>
+        </article>
+      `)
+      .join("");
+    const list = document.getElementById("release-list");
+    if (list) list.innerHTML = html;
+  } catch {
+    // network unreachable → keep server-rendered fallback
+  }
+})();
+</script>

@@ -145,11 +145,32 @@ jobs:
       - name: List downloaded artifacts
         run: find artifacts -type f | sort
 
+      - name: Capture GitHub Release body for `notes`
+        id: relbody
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          # The release was just created by softprops/action-gh-release with
+          # generate_release_notes: true → `gh release view` returns the
+          # auto-generated changelog (commits since previous tag). Pipe it
+          # through the GHA-recommended multiline-output protocol so newlines
+          # survive into the next step's env.
+          body="$(gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+          echo "▸ release body preview ($(echo "$body" | wc -l | tr -d ' ') lines):"
+          echo "$body" | head -10
+          {
+            echo "body<<DOCMIND_NOTES_EOF"
+            echo "$body"
+            echo "DOCMIND_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Publish each platform's updater bundle
         env:
           PUBLISH_URL: ${{ vars.DOCAPI_PUBLISH_URL || 'https://doc-api.boyobang.com/api/v1/releases/publish' }}
           PUBLISH_TOKEN: ${{ secrets.RELEASES_PUBLISH_TOKEN }}
           VERSION: ${{ github.ref_name }}
+          RELEASE_BODY: ${{ steps.relbody.outputs.body }}
         run: |
           set -euo pipefail
           if [ -z "$PUBLISH_TOKEN" ]; then
@@ -175,7 +196,7 @@ jobs:
               -H "Authorization: Bearer $PUBLISH_TOKEN" \
               -F "version=$version" \
               -F "platform=$platform" \
-              -F "notes=Auto-published from GitHub Release $VERSION" \
+              -F "notes=$RELEASE_BODY" \
               -F "signature=$(cat "$sig")" \
               -F "binary=@$updater" \
               | tee /dev/stderr
