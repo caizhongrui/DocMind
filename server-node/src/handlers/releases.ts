@@ -139,6 +139,60 @@ apiReleasesRouter.post("/releases/publish", async (c) => {
   });
 });
 
+/**
+ * Token-authed update of the release notes for an already-published
+ * version. Used to retrofit notes onto releases that were uploaded
+ * before the workflow learned to capture the GitHub Release body.
+ *
+ * Auth: same Bearer token as /releases/publish.
+ *
+ * Body (JSON or form):
+ *   version   string  required  e.g. "0.1.5"
+ *   platform  string  optional  if omitted, every row with that
+ *                                version is updated
+ *   notes     string  required  new notes content
+ */
+apiReleasesRouter.post("/releases/notes", async (c) => {
+  const expected = process.env.RELEASES_PUBLISH_TOKEN;
+  if (!expected) {
+    return c.json({ error: "RELEASES_PUBLISH_TOKEN not set on server" }, 503);
+  }
+  const auth = c.req.header("authorization") ?? "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!token || token !== expected) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+
+  const ct = c.req.header("content-type") ?? "";
+  let version = "";
+  let platform = "";
+  let notes = "";
+  if (ct.includes("application/json")) {
+    const body = await c.req.json().catch(() => ({}) as any);
+    version = String(body?.version ?? "").trim();
+    platform = String(body?.platform ?? "").trim();
+    notes = String(body?.notes ?? "");
+  } else {
+    const form = await c.req.formData();
+    version = String(form.get("version") ?? "").trim();
+    platform = String(form.get("platform") ?? "").trim();
+    notes = String(form.get("notes") ?? "");
+  }
+  if (!version) return c.json({ error: "version required" }, 400);
+  if (!notes) return c.json({ error: "notes required" }, 400);
+
+  const { db } = c.var.app;
+  const stmt = platform
+    ? db.prepare(`UPDATE releases SET notes = ? WHERE version = ? AND platform = ?`)
+    : db.prepare(`UPDATE releases SET notes = ? WHERE version = ?`);
+  const r = platform ? stmt.run(notes, version, platform) : stmt.run(notes, version);
+  if (r.changes === 0) {
+    return c.json({ error: `no rows matched version=${version}${platform ? `, platform=${platform}` : ""}` }, 404);
+  }
+  console.log(`[releases] notes updated for v${version}${platform ? ` (${platform})` : ""} — ${r.changes} row(s)`);
+  return c.json({ ok: true, rows_updated: r.changes, version, platform: platform || null });
+});
+
 apiReleasesRouter.get("/releases/public", (c) => {
   const { db } = c.var.app;
   const rows = db
