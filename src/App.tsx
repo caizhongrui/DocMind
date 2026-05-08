@@ -1,11 +1,10 @@
-import { Layout, Button, Spin, Drawer, Tooltip, Typography, Progress, notification, Tour } from "antd";
+import { Layout, Button, Spin, Drawer, Tooltip, Typography, Progress, Tour } from "antd";
 import type { TourProps } from "antd";
 import {
   SettingOutlined,
   RobotOutlined,
   MessageOutlined,
   FileSearchOutlined,
-  CloudDownloadOutlined,
   QuestionCircleOutlined,
 } from "@ant-design/icons";
 import { invoke } from "@tauri-apps/api/core";
@@ -70,7 +69,7 @@ export default function App() {
   const [modelAvailable, setModelAvailable] = useState(false);
   const [embeddingCount, setEmbeddingCount] = useState(0);
   const [embedProgress, setEmbedProgress] = useState<EmbedProgress | null>(null);
-  const [updateAvailable, setUpdateAvailable] = useState(false);
+  // (Legacy update banner state removed — handled by <UpdateNotifier />.)
 
   // License store: refresh on mount and start listening for backend events.
   const refreshLicense = useLicenseStore((s) => s.refresh);
@@ -202,18 +201,6 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [embedProgress]);
-
-  // ── 自动更新检查（启动后延迟 5s，避免影响启动速度）──
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      invoke<boolean>("check_update")
-        .then((available) => {
-          if (available) setUpdateAvailable(true);
-        })
-        .catch(() => {}); // 网络不通或服务未搭建时静默忽略
-    }, 5000);
-    return () => clearTimeout(timer);
-  }, []);
 
   // ── 首次使用自动触发引导 ──
   useEffect(() => {
@@ -369,24 +356,7 @@ export default function App() {
               </Tooltip>
             )}
 
-            {/* 自动更新提示 */}
-            {updateAvailable && (
-              <Tooltip title="发现新版本，点击查看更新说明">
-                <Button
-                  type="text" size="small"
-                  icon={<CloudDownloadOutlined style={{ fontSize: 16, color: "#f59e0b" }} />}
-                  onClick={() => {
-                    notification.info({
-                      message: "发现新版本",
-                      description: "请前往 GitHub Releases 下载最新版本。",
-                      placement: "topRight",
-                      duration: 8,
-                    });
-                  }}
-                  style={{ width: 32, height: 32, borderRadius: 8 }}
-                />
-              </Tooltip>
-            )}
+            {/* (Update notifications now come from <UpdateNotifier />.) */}
 
             <Tooltip title={
               modelAvailable && embeddingCount > 0 ? "AI 语义搜索已就绪"
