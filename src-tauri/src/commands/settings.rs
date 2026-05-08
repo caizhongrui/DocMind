@@ -153,6 +153,80 @@ pub fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
+/// Convert a legacy .doc / .ppt to HTML using whatever system tool is
+/// available, returning the HTML body string. Returns Err with a stable
+/// sentinel `"NO_CONVERTER"` if no converter is found, so the front-end
+/// can decide between "render this HTML" and "fall back to text mode".
+///
+/// Strategy:
+///   - macOS:    `textutil -convert html -stdout <path>` (built-in, no
+///               install needed, handles .doc/.docx/.rtf well).
+///   - Windows / Linux: `soffice --headless --convert-to html` if
+///               LibreOffice is on PATH; otherwise NO_CONVERTER.
+///
+/// We deliberately don't bundle a converter — keeping the binary small.
+#[tauri::command]
+pub async fn convert_legacy_doc_to_html(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        use std::process::Command;
+
+        #[cfg(target_os = "macos")]
+        {
+            let output = Command::new("textutil")
+                .args(["-convert", "html", "-stdout", &path])
+                .output()
+                .map_err(|e| format!("textutil 启动失败: {e}"))?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("textutil 转换失败: {stderr}"));
+            }
+            return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            // Try soffice (LibreOffice / OpenOffice). It writes the
+            // converted file to an --outdir, so we point it at a temp dir
+            // and read the result back.
+            let probe = Command::new("soffice").arg("--version").output();
+            if probe.is_err() || !probe.as_ref().map(|o| o.status.success()).unwrap_or(false) {
+                return Err("NO_CONVERTER".to_string());
+            }
+            let tmp = std::env::temp_dir().join(format!(
+                "docmind-doc-preview-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::create_dir_all(&tmp);
+            let r = Command::new("soffice")
+                .args([
+                    "--headless",
+                    "--convert-to",
+                    "html",
+                    "--outdir",
+                    tmp.to_string_lossy().as_ref(),
+                    &path,
+                ])
+                .output()
+                .map_err(|e| format!("soffice 启动失败: {e}"))?;
+            if !r.status.success() {
+                let stderr = String::from_utf8_lossy(&r.stderr);
+                return Err(format!("soffice 转换失败: {stderr}"));
+            }
+            let stem = std::path::Path::new(&path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("output");
+            let out_html = tmp.join(format!("{stem}.html"));
+            let html = std::fs::read_to_string(&out_html)
+                .map_err(|e| format!("读取转换结果失败: {e}"))?;
+            let _ = std::fs::remove_dir_all(&tmp);
+            Ok(html)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// 读取已保存的全局快捷键（None = 未设置）
 #[tauri::command]
 pub fn get_global_shortcut(state: State<'_, AppState>) -> Option<String> {

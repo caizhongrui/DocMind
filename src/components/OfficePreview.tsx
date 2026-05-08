@@ -198,12 +198,16 @@ export default function OfficePreview({ path, fileType }: Props) {
 
         if (ft === "docx" || ft === "doc") {
           if (fmt === "cfb") {
-            // Legacy Word97 .doc — fall back to the Rust-side
-            // best-effort text extractor (utf16le byte scanner).
-            // Render as plain text in a styled iframe so the user
-            // still gets *something* useful instead of an error.
-            const text = await invoke<string>("read_file_preview", { path });
-            if (!cancelled) setDocHtml(buildPlainTextHtml(text, "Word 97-2003 (.doc) · 仅文本预览"));
+            // Legacy Word97 .doc. Try the system converter first
+            // (textutil on macOS, soffice on win/linux). Fall back to
+            // the byte-scanned plaintext if no converter is found.
+            try {
+              const html = await invoke<string>("convert_legacy_doc_to_html", { path });
+              if (!cancelled) setDocHtml(html);
+            } catch (err) {
+              const text = await invoke<string>("read_file_preview", { path });
+              if (!cancelled) setDocHtml(buildPlainTextHtml(text, `Word 97-2003 (.doc) · 仅文本预览（${String(err)}）`));
+            }
             return;
           }
           const mammoth = (await import("mammoth")).default;
@@ -224,9 +228,14 @@ export default function OfficePreview({ path, fileType }: Props) {
 
         } else if (ft === "pptx" || ft === "ppt") {
           if (fmt === "cfb") {
-            // Legacy PowerPoint97 — same fallback as .doc above.
-            const text = await invoke<string>("read_file_preview", { path });
-            if (!cancelled) setDocHtml(buildPlainTextHtml(text, "PowerPoint 97-2003 (.ppt) · 仅文本预览"));
+            // Legacy PowerPoint97 — same converter chain as .doc.
+            try {
+              const html = await invoke<string>("convert_legacy_doc_to_html", { path });
+              if (!cancelled) setDocHtml(html);
+            } catch (err) {
+              const text = await invoke<string>("read_file_preview", { path });
+              if (!cancelled) setDocHtml(buildPlainTextHtml(text, `PowerPoint 97-2003 (.ppt) · 仅文本预览（${String(err)}）`));
+            }
             return;
           }
           const JSZip = (await import("jszip")).default;
