@@ -51,6 +51,7 @@ jobs:
           path: |
             src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
             src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
 
   build-windows:
     name: Build Windows x64
@@ -81,7 +82,7 @@ jobs:
         run: npm run tauri build
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # 强制所有通过 cc crate 编译的 C/C++ 代码使用动态 CRT (/MD)
           # 与 ort_sys (ONNX Runtime) 和 llama_cpp_sys_2 预编译库保持一致
           # CFLAGS/CXXFLAGS 追加在编译命令末尾，/MD 会覆盖 cc crate 默认的 /MT
@@ -94,4 +95,33 @@ jobs:
           name: windows-x64
           path: |
             src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.sig
             src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/msi/*.msi.sig
+
+  # ── Tag 推送时自动创建 GitHub Release，把两个平台的产物挂上去 ────────────
+  release:
+    name: Publish GitHub Release
+    needs: [build-macos, build-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create release with all artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: DocMind ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/macos-universal/dmg/*.dmg
+            artifacts/macos-universal/macos/*.app.tar.gz
+            artifacts/macos-universal/macos/*.app.tar.gz.sig
+            artifacts/windows-x64/nsis/*.exe
+            artifacts/windows-x64/nsis/*.exe.sig
+            artifacts/windows-x64/msi/*.msi
+            artifacts/windows-x64/msi/*.msi.sig
