@@ -197,21 +197,24 @@ export default function OfficePreview({ path, fileType }: Props) {
         const fmt = detectOfficeFormat(buffer);
 
         if (ft === "docx" || ft === "doc") {
+          let docxBuffer = buffer;
           if (fmt === "cfb") {
-            // Legacy Word97 .doc. Try the system converter first
-            // (textutil on macOS, soffice on win/linux). Fall back to
-            // the byte-scanned plaintext if no converter is found.
+            // Legacy Word97 .doc. Convert it to .docx via the system
+            // converter (textutil on macOS, soffice elsewhere) and run
+            // the result through the same mammoth path used for native
+            // .docx — fidelity matches.
             try {
-              const html = await invoke<string>("convert_legacy_doc_to_html", { path });
-              if (!cancelled) setDocHtml(html);
+              const b64 = await invoke<string>("convert_legacy_to_modern", { path });
+              docxBuffer = base64ToArrayBuffer(b64);
             } catch (err) {
+              // No converter installed → fall back to plaintext extractor.
               const text = await invoke<string>("read_file_preview", { path });
               if (!cancelled) setDocHtml(buildPlainTextHtml(text, `Word 97-2003 (.doc) · 仅文本预览（${String(err)}）`));
+              return;
             }
-            return;
           }
           const mammoth = (await import("mammoth")).default;
-          const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
+          const result = await mammoth.convertToHtml({ arrayBuffer: docxBuffer });
           if (!cancelled) setDocHtml(buildDocxHtml(result.value));
 
         } else if (ft === "xlsx" || ft === "xls" || ft === "csv") {
@@ -227,19 +230,21 @@ export default function OfficePreview({ path, fileType }: Props) {
           if (!cancelled) setXlsxSheets(sheets);
 
         } else if (ft === "pptx" || ft === "ppt") {
+          let pptxBuffer = buffer;
           if (fmt === "cfb") {
-            // Legacy PowerPoint97 — same converter chain as .doc.
+            // Legacy PowerPoint97 — convert to .pptx and reuse the
+            // jszip-based slide parser.
             try {
-              const html = await invoke<string>("convert_legacy_doc_to_html", { path });
-              if (!cancelled) setDocHtml(html);
+              const b64 = await invoke<string>("convert_legacy_to_modern", { path });
+              pptxBuffer = base64ToArrayBuffer(b64);
             } catch (err) {
               const text = await invoke<string>("read_file_preview", { path });
               if (!cancelled) setDocHtml(buildPlainTextHtml(text, `PowerPoint 97-2003 (.ppt) · 仅文本预览（${String(err)}）`));
+              return;
             }
-            return;
           }
           const JSZip = (await import("jszip")).default;
-          const zip = await JSZip.loadAsync(buffer);
+          const zip = await JSZip.loadAsync(pptxBuffer);
           const slides = await parsePptxSlides(zip as import("jszip"));
           if (!cancelled) setPptxSlides(slides);
         }

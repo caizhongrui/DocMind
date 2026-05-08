@@ -153,55 +153,86 @@ pub fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
-/// Convert a legacy .doc / .ppt to HTML using whatever system tool is
-/// available, returning the HTML body string. Returns Err with a stable
-/// sentinel `"NO_CONVERTER"` if no converter is found, so the front-end
-/// can decide between "render this HTML" and "fall back to text mode".
+/// Convert a legacy .doc / .ppt to its modern OOXML counterpart
+/// (.docx / .pptx) and return the bytes base64-encoded. The front-end
+/// then routes the result through mammoth (.docx) or jszip (.pptx),
+/// the same renderers used for native modern Office files — so the
+/// preview fidelity matches.
 ///
 /// Strategy:
-///   - macOS:    `textutil -convert html -stdout <path>` (built-in, no
-///               install needed, handles .doc/.docx/.rtf well).
-///   - Windows / Linux: `soffice --headless --convert-to html` if
-///               LibreOffice is on PATH; otherwise NO_CONVERTER.
+///   - macOS .doc:           `textutil -convert docx`  (built-in)
+///   - macOS .ppt:           `soffice` (textutil can't do PowerPoint)
+///   - other platforms:      `soffice --convert-to <docx|pptx>`
 ///
-/// We deliberately don't bundle a converter — keeping the binary small.
+/// Returns Err("NO_CONVERTER") if no tool is available.
 #[tauri::command]
-pub async fn convert_legacy_doc_to_html(path: String) -> Result<String, String> {
+pub async fn convert_legacy_to_modern(path: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
+        use base64::Engine;
         use std::process::Command;
 
+        let p = std::path::Path::new(&path);
+        let ext = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .unwrap_or_default();
+
+        let target_ext = match ext.as_str() {
+            "doc" => "docx",
+            "ppt" => "pptx",
+            other => return Err(format!("unsupported source extension: {other}")),
+        };
+        let stem = p
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
+
+        let tmp = std::env::temp_dir().join(format!(
+            "docmind-doc-convert-{}-{}",
+            std::process::id(),
+            stem,
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let out_path = tmp.join(format!("{stem}.{target_ext}"));
+
+        // Pick converter.
+        let mut used_textutil = false;
         #[cfg(target_os = "macos")]
-        {
-            let output = Command::new("textutil")
-                .args(["-convert", "html", "-stdout", &path])
+        if ext == "doc" {
+            // textutil handles .doc → .docx natively, no LibreOffice needed.
+            let r = Command::new("textutil")
+                .args([
+                    "-convert",
+                    target_ext,
+                    "-output",
+                    out_path.to_string_lossy().as_ref(),
+                    &path,
+                ])
                 .output()
                 .map_err(|e| format!("textutil 启动失败: {e}"))?;
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
+            if !r.status.success() {
+                let _ = std::fs::remove_dir_all(&tmp);
+                let stderr = String::from_utf8_lossy(&r.stderr);
                 return Err(format!("textutil 转换失败: {stderr}"));
             }
-            return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+            used_textutil = true;
         }
 
-        #[cfg(not(target_os = "macos"))]
-        {
-            // Try soffice (LibreOffice / OpenOffice). It writes the
-            // converted file to an --outdir, so we point it at a temp dir
-            // and read the result back.
+        if !used_textutil {
+            // soffice (LibreOffice / OpenOffice headless). Probe first so we
+            // can return the stable NO_CONVERTER sentinel and let the
+            // front-end fall back gracefully.
             let probe = Command::new("soffice").arg("--version").output();
             if probe.is_err() || !probe.as_ref().map(|o| o.status.success()).unwrap_or(false) {
+                let _ = std::fs::remove_dir_all(&tmp);
                 return Err("NO_CONVERTER".to_string());
             }
-            let tmp = std::env::temp_dir().join(format!(
-                "docmind-doc-preview-{}",
-                std::process::id()
-            ));
-            let _ = std::fs::create_dir_all(&tmp);
             let r = Command::new("soffice")
                 .args([
                     "--headless",
                     "--convert-to",
-                    "html",
+                    target_ext,
                     "--outdir",
                     tmp.to_string_lossy().as_ref(),
                     &path,
@@ -209,19 +240,16 @@ pub async fn convert_legacy_doc_to_html(path: String) -> Result<String, String> 
                 .output()
                 .map_err(|e| format!("soffice 启动失败: {e}"))?;
             if !r.status.success() {
+                let _ = std::fs::remove_dir_all(&tmp);
                 let stderr = String::from_utf8_lossy(&r.stderr);
                 return Err(format!("soffice 转换失败: {stderr}"));
             }
-            let stem = std::path::Path::new(&path)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("output");
-            let out_html = tmp.join(format!("{stem}.html"));
-            let html = std::fs::read_to_string(&out_html)
-                .map_err(|e| format!("读取转换结果失败: {e}"))?;
-            let _ = std::fs::remove_dir_all(&tmp);
-            Ok(html)
         }
+
+        let bytes = std::fs::read(&out_path)
+            .map_err(|e| format!("读取转换结果失败: {e}"))?;
+        let _ = std::fs::remove_dir_all(&tmp);
+        Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
     })
     .await
     .map_err(|e| e.to_string())?

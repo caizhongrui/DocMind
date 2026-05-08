@@ -438,7 +438,7 @@ pub fn run() {
             commands::settings::get_global_shortcut,
             commands::settings::set_global_shortcut,
             commands::settings::write_text_file,
-            commands::settings::convert_legacy_doc_to_html,
+            commands::settings::convert_legacy_to_modern,
             commands::llm::stop_generation,
             commands::llm::get_api_llm_config,
             commands::llm::set_api_llm_config,
