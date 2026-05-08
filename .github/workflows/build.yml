@@ -9,88 +9,116 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Common Tauri signing env, reused by every build job.
+env:
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
 jobs:
-  build-macos:
-    name: Build macOS Universal
-    runs-on: macos-latest
+  # ── macOS Apple Silicon (M-series) ────────────────────────────────────
+  build-macos-arm64:
+    name: Build macOS arm64
+    runs-on: macos-latest          # macos-14+ runners are Apple Silicon
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: aarch64-apple-darwin
 
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          key: macos-arm64
 
-      - name: Install frontend dependencies
-        run: npm ci
+      - run: npm ci
 
-      - name: Build macOS Universal Binary
-        run: npm run tauri build -- --target universal-apple-darwin
+      - name: Build (aarch64-apple-darwin)
+        run: npm run tauri build -- --target aarch64-apple-darwin
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # llama.cpp 使用 std::filesystem，需要 macOS 10.15+
-          # 此变量传递给 llama-cpp-sys-2 的 cmake 构建，设置 -mmacosx-version-min
+          # llama.cpp 用 std::filesystem,要求 macOS 10.15+
           MACOSX_DEPLOYMENT_TARGET: "10.15"
 
-      - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: macos-universal
+          name: macos-arm64
           path: |
-            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
-            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
 
-  build-windows:
+  # ── macOS Intel ───────────────────────────────────────────────────────
+  build-macos-x64:
+    name: Build macOS x64 (Intel)
+    runs-on: macos-13              # GitHub's last x86_64 macOS runner
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: macos-x64
+
+      - run: npm ci
+
+      - name: Build (x86_64-apple-darwin)
+        run: npm run tauri build -- --target x86_64-apple-darwin
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-x64
+          path: |
+            src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+
+  # ── Windows x64 ───────────────────────────────────────────────────────
+  build-windows-x64:
     name: Build Windows x64
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          # 包含 .cargo/config.toml 哈希，确保 CRT 标志变化时缓存失效
-          key: ${{ hashFiles('src-tauri/.cargo/config.toml') }}
+          # 包含 .cargo/config.toml 哈希，CRT 标志变化时缓存失效
+          key: windows-x64-${{ hashFiles('src-tauri/.cargo/config.toml') }}
 
-      - name: Install frontend dependencies
-        run: npm ci
+      - run: npm ci
 
-      - name: Build Windows
+      - name: Build (x86_64-pc-windows-msvc)
         run: npm run tauri build
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # 强制所有通过 cc crate 编译的 C/C++ 代码使用动态 CRT (/MD)
-          # 与 ort_sys (ONNX Runtime) 和 llama_cpp_sys_2 预编译库保持一致
-          # CFLAGS/CXXFLAGS 追加在编译命令末尾，/MD 会覆盖 cc crate 默认的 /MT
+          # 强制 cc crate 编译的 C/C++ 用动态 CRT (/MD)，
+          # 与 ort_sys (ONNX Runtime) / llama_cpp_sys_2 预编译库一致
           CFLAGS: /MD
           CXXFLAGS: /MD
 
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: windows-x64
           path: |
@@ -99,10 +127,10 @@ jobs:
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/msi/*.msi.sig
 
-  # ── Tag 推送时自动创建 GitHub Release，把两个平台的产物挂上去 ────────────
+  # ── Tag 推送时,把三个平台的产物挂到 GitHub Release ────────────────────
   release:
     name: Publish GitHub Release
-    needs: [build-macos, build-windows]
+    needs: [build-macos-arm64, build-macos-x64, build-windows-x64]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -111,16 +139,22 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Create release with all artifacts
-        uses: softprops/action-gh-release@v2
+
+      - name: List downloaded artifacts
+        run: find artifacts -type f | sort
+
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: DocMind ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            artifacts/macos-universal/dmg/*.dmg
-            artifacts/macos-universal/macos/*.app.tar.gz
-            artifacts/macos-universal/macos/*.app.tar.gz.sig
+            artifacts/macos-arm64/dmg/*.dmg
+            artifacts/macos-arm64/macos/*.app.tar.gz
+            artifacts/macos-arm64/macos/*.app.tar.gz.sig
+            artifacts/macos-x64/dmg/*.dmg
+            artifacts/macos-x64/macos/*.app.tar.gz
+            artifacts/macos-x64/macos/*.app.tar.gz.sig
             artifacts/windows-x64/nsis/*.exe
             artifacts/windows-x64/nsis/*.exe.sig
             artifacts/windows-x64/msi/*.msi
