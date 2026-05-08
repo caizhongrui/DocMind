@@ -6,7 +6,8 @@
 #       Host = doc-api.* → API + admin + activate
 #   - 宿主机宝塔 Nginx 终止 SSL,反代两个子域到 127.0.0.1:8080。
 #
-# 多架构友好:WASM SQLite + 纯 JS 依赖,一份镜像跨 amd64 / arm64 通吃。
+# better-sqlite3 通过 prebuild-install 拉取 Alpine x64 / arm64 预编译二进制,
+# 找不到才回落到源码编译(server-build 阶段已带 python3 + g++)。
 
 # ────────────────────────────────────────────────────────────────────────────
 # Stage 1: Portal (Astro static)
@@ -23,6 +24,11 @@ RUN npm run build
 # ────────────────────────────────────────────────────────────────────────────
 FROM docker.m.daocloud.io/library/node:20-alpine AS server-build
 WORKDIR /server
+
+# Native build deps for better-sqlite3 (used only as a fallback when
+# prebuild-install can't fetch the prebuilt .node binary).
+RUN apk add --no-cache python3 make g++ libc-dev linux-headers
+
 COPY server-node/package.json server-node/package-lock.json* ./
 RUN npm ci --no-audit --no-fund
 COPY server-node/tsconfig.json ./

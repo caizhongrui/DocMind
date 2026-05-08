@@ -6,7 +6,7 @@
  * try/catch on "duplicate column name".
  */
 
-import type { Database } from "./index.js";
+import type { Database } from "better-sqlite3";
 
 export function applyMigrations(db: Database) {
   db.exec(`
