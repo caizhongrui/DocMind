@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
 #
-# Build the DocMind backend Docker image and push to the private registry.
+# Build the DocMind backend Docker image (multi-arch) and push to the registry.
 #
-# Tag scheme:  registry.boyocloud.com/boyo/docmind-server:YYYYMMDD-N
-#              registry.boyocloud.com/boyo/docmind-server:latest
+# 默认推到阿里云青岛(国内服务器拉得快):
+#   registry.cn-qingdao.aliyuncs.com/boyocloud/docmind-server:YYYYMMDD-N
+#   registry.cn-qingdao.aliyuncs.com/boyocloud/docmind-server:latest
 #
-# `N` 是当天的发布序号 — 脚本自动从 registry 查最近今天的 tag 并自增。
-# 也可以传一个完整 tag 跳过自动检测:  bash scripts/build-and-push.sh 20260508-3
+# 用 docker buildx 构建 linux/amd64 + linux/arm64,适配国内 x86 服务器
+# 与 Apple Silicon / ARM 服务器。
+#
+# 用法:
+#   bash scripts/build-and-push.sh                  # 自动今天日期 + 序号 +1
+#   bash scripts/build-and-push.sh 20260508-3       # 手动指定 tag
+#   REGISTRY=... bash scripts/build-and-push.sh     # 换 registry
 
 set -euo pipefail
 
-REGISTRY=${REGISTRY:-registry.boyocloud.com/boyo}
+REGISTRY=${REGISTRY:-registry.cn-qingdao.aliyuncs.com/boyocloud}
 IMAGE_NAME=${IMAGE_NAME:-docmind-server}
+PLATFORMS=${PLATFORMS:-linux/amd64,linux/arm64}
 DATE_TAG=$(date +%Y%m%d)
 
 # ── 决定具体 tag ───────────────────────────────────────────────────────────
@@ -19,8 +26,6 @@ if [ $# -ge 1 ]; then
     TAG="$1"
     echo "[build] using user-specified tag: $TAG"
 else
-    # 在本地 docker 镜像缓存里找今天最高序号(不依赖 registry 网络可达)。
-    # 如果你只在 push 后才依赖 registry 中的 tag 可见性,改成查 registry 也行。
     HIGHEST=$(docker images "${REGISTRY}/${IMAGE_NAME}" --format '{{.Tag}}' \
         | grep -E "^${DATE_TAG}-[0-9]+$" \
         | sed -E "s/^${DATE_TAG}-//" \
@@ -38,40 +43,38 @@ fi
 FULL_TAG="${REGISTRY}/${IMAGE_NAME}:${TAG}"
 LATEST_TAG="${REGISTRY}/${IMAGE_NAME}:latest"
 
-# ── 构建 ───────────────────────────────────────────────────────────────────
 cd "$(dirname "$0")/.."
 
-echo "[build] docker build -t ${FULL_TAG} ..."
-docker build --pull -t "${FULL_TAG}" -t "${LATEST_TAG}" .
-
-# ── 询问是否推送(可用 PUSH=1 跳过) ──────────────────────────────────────
-PUSH=${PUSH:-}
-if [ -z "$PUSH" ]; then
-    read -rp "Push ${FULL_TAG} 到 ${REGISTRY} ? [y/N] " ans
-    case "$ans" in
-        y|Y|yes) PUSH=1 ;;
-        *)       PUSH=0 ;;
-    esac
+# ── 确保 buildx builder 存在 ──────────────────────────────────────────────
+if ! docker buildx inspect multi-builder >/dev/null 2>&1; then
+    echo "[build] creating buildx builder 'multi-builder'..."
+    docker buildx create --name multi-builder --use --bootstrap
+else
+    docker buildx use multi-builder
 fi
 
-if [ "$PUSH" = "1" ]; then
-    echo "[push] ${FULL_TAG}"
-    docker push "${FULL_TAG}"
-    echo "[push] ${LATEST_TAG}"
-    docker push "${LATEST_TAG}"
-fi
+# ── 构建并推送 ────────────────────────────────────────────────────────────
+echo "[build] platforms: ${PLATFORMS}"
+echo "[build] tags: ${FULL_TAG}, ${LATEST_TAG}"
+echo "[build] (multi-arch builds 直接推送,不会落到本地 docker images)"
 
-# ── 在服务器上的拉取命令(便于复制) ──────────────────────────────────────
+docker buildx build \
+    --platform "${PLATFORMS}" \
+    --tag "${FULL_TAG}" \
+    --tag "${LATEST_TAG}" \
+    --push \
+    .
+
 echo
 echo "═════════════════════════════════════════════════════════════════"
+echo "  ✅ 已推送(多架构)"
 echo "  本次 tag: ${TAG}"
 echo "  完整镜像: ${FULL_TAG}"
 echo
 echo "  在生产服务器上更新到这个版本:"
 echo "    cd /opt/docmind"
-echo "    IMAGE_TAG=${FULL_TAG} docker compose pull"
-echo "    IMAGE_TAG=${FULL_TAG} docker compose up -d"
-echo
-echo "  或固定到 latest:"
 echo "    docker compose pull && docker compose up -d"
+echo
+echo "  固定到具体 tag(回滚用):"
+echo "    IMAGE_TAG=${FULL_TAG} docker compose up -d"
 echo "═════════════════════════════════════════════════════════════════"

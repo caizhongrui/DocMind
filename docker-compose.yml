@@ -14,7 +14,7 @@ services:
     # 镜像 tag 由 scripts/build-and-push.sh 生成:
     #   registry.boyocloud.com/boyo/docmind-server:YYYYMMDD-N
     # IMAGE_TAG 优先用环境变量,默认拉 latest。
-    image: ${IMAGE_TAG:-registry.boyocloud.com/boyo/docmind-server:latest}
+    image: ${IMAGE_TAG:-registry.cn-qingdao.aliyuncs.com/boyocloud/docmind-server:latest}
     build:
       context: .
       dockerfile: Dockerfile

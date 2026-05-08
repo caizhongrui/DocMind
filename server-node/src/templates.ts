@@ -1,12 +1,12 @@
-//! Tiny HTML helpers for the server-rendered admin UI.
-//!
-//! Intentionally simple: no template engine, no SPA. Each admin page builds
-//! a `body` string and passes it to [`layout`], which wraps it with the nav
-//! and shared CSS.
+/**
+ * Tiny HTML helpers for the server-rendered admin UI.
+ *
+ * Intentionally simple: no template engine, no SPA. Each admin page builds
+ * a `body` string and passes it to [`layout`], which wraps it with the nav
+ * and shared CSS.
+ */
 
-use axum::response::Html;
-
-const BASE_CSS: &str = r#"
+const BASE_CSS = `
 :root {
   --bg: #0c0d10;
   --surface: #16181d;
@@ -54,26 +54,34 @@ a { color: var(--primary); }
 form { display: inline; }
 .row { display: flex; gap: 8px; align-items: center; }
 .row > * { flex: 0 0 auto; }
-"#;
+`;
 
-const LOGIN_CSS: &str = r#"
-body.login-bg { background: linear-gradient(180deg, var(--bg) 0%, var(--surface) 100%); display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+const STANDALONE_CSS = `
+body.standalone-bg { background: linear-gradient(180deg, var(--bg) 0%, var(--surface) 100%); display: flex; align-items: center; justify-content: center; min-height: 100vh; }
 .login-box { width: 360px; padding: 32px 28px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
 .login-box h1 { text-align: center; margin-bottom: 24px; font-size: 16px; }
 .login-box label { display: block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); margin: 12px 0 6px; }
 .login-box input { width: 100%; height: 36px; }
-"#;
+`;
 
-/// Render a page with the admin nav.
-pub fn layout(title: &str, body: &str) -> Html<String> {
-    let html = format!(
-        r#"<!DOCTYPE html>
+export function htmlEscape(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Render a page with the admin nav. */
+export function layout(title: string, body: string): string {
+  return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>{title} · DocMind Admin</title>
+  <title>${htmlEscape(title)} · DocMind Admin</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>{css}</style>
+  <style>${BASE_CSS}</style>
 </head>
 <body>
   <nav class="nav">
@@ -88,44 +96,23 @@ pub fn layout(title: &str, body: &str) -> Html<String> {
       <button type="submit">登出</button>
     </form>
   </nav>
-  <main class="main">{body}</main>
+  <main class="main">${body}</main>
 </body>
-</html>"#,
-        title = html_escape(title),
-        css = BASE_CSS,
-        body = body
-    );
-    Html(html)
+</html>`;
 }
 
-/// Render a standalone page without the admin nav (login, public activate).
-pub fn standalone(title: &str, body: &str) -> Html<String> {
-    let html = format!(
-        r#"<!DOCTYPE html>
+/** Render a standalone page without the admin nav (login, public activate). */
+export function standalone(title: string, body: string): string {
+  return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>{title} · DocMind</title>
+  <title>${htmlEscape(title)} · DocMind</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>{base}{login}</style>
+  <style>${BASE_CSS}${STANDALONE_CSS}</style>
 </head>
-<body class="login-bg">
-  {body}
+<body class="standalone-bg">
+  ${body}
 </body>
-</html>"#,
-        title = html_escape(title),
-        base = BASE_CSS,
-        login = LOGIN_CSS,
-        body = body
-    );
-    Html(html)
-}
-
-/// Minimal HTML escape for user-controlled values inserted into body text.
-pub fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
+</html>`;
 }

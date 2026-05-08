@@ -1,76 +1,62 @@
-# DocMind self-hosted backend(API + 门户站,单容器)
+# DocMind self-hosted backend(API + 门户站,单容器,Node 20)
 #
 # 部署模式:
-#   - 容器内:Caddy(:8080,plain HTTP)按 Host 分流到
-#       doc-web.* → /app/portal 静态文件
-#       doc-api.* → Axum :8081(loopback)
-#   - 宿主机:宝塔 Nginx 终止 SSL,反代两个子域到 127.0.0.1:8080
+#   - 容器内 Node :8080 监听 plain HTTP,按 Host 头分流:
+#       Host = doc-web.* → 静态门户(/app/portal,Astro 构建产物)
+#       Host = doc-api.* → API + admin + activate
+#   - 宿主机宝塔 Nginx 终止 SSL,反代两个子域到 127.0.0.1:8080。
 #
-# Stages:
-#   1. portal-build  Astro 静态产物
-#   2. server-build  Rust Axum 二进制
-#   3. runtime       Debian slim + Caddy + 两个产物
+# 多架构友好:WASM SQLite + 纯 JS 依赖,一份镜像跨 amd64 / arm64 通吃。
 
 # ────────────────────────────────────────────────────────────────────────────
-# Stage 1: Portal (Astro)
+# Stage 1: Portal (Astro static)
 # ────────────────────────────────────────────────────────────────────────────
 FROM docker.m.daocloud.io/library/node:20-alpine AS portal-build
 WORKDIR /portal
 COPY portal/package.json portal/package-lock.json* ./
-RUN npm install --no-audit --no-fund
+RUN npm ci --no-audit --no-fund
 COPY portal/ ./
 RUN npm run build
-# 产物:/portal/dist
 
 # ────────────────────────────────────────────────────────────────────────────
-# Stage 2: Server (Rust + Axum)
+# Stage 2: Server (Node + TypeScript)
 # ────────────────────────────────────────────────────────────────────────────
-FROM docker.m.daocloud.io/library/rust:1.86-slim AS server-build
+FROM docker.m.daocloud.io/library/node:20-alpine AS server-build
 WORKDIR /server
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        pkg-config build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY server/Cargo.toml server/Cargo.lock ./
-RUN mkdir -p src && echo "fn main() {}" > src/main.rs && cargo build --release && rm -rf src
-
-COPY server/src ./src
-RUN touch src/main.rs && cargo build --release
+COPY server-node/package.json server-node/package-lock.json* ./
+RUN npm ci --no-audit --no-fund
+COPY server-node/tsconfig.json ./
+COPY server-node/src ./src
+RUN npm run build && \
+    npm prune --omit=dev
 
 # ────────────────────────────────────────────────────────────────────────────
 # Stage 3: Runtime
 # ────────────────────────────────────────────────────────────────────────────
-FROM docker.m.daocloud.io/library/debian:bookworm-slim AS runtime
+FROM docker.m.daocloud.io/library/node:20-alpine AS runtime
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        tini \
-        curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy the official Caddy binary directly — Go static binary, works on any
-# glibc system. Avoids adding the cloudsmith apt repo (which breaks against
-# the daocloud-mirrored debian image due to keyring deps).
-COPY --from=docker.m.daocloud.io/library/caddy:2.10-alpine /usr/bin/caddy /usr/local/bin/caddy
+RUN apk add --no-cache tini
 
 WORKDIR /app
 
-COPY --from=portal-build /portal/dist                            /app/portal
-COPY --from=server-build /server/target/release/docmind-server   /usr/local/bin/docmind-server
-COPY Caddyfile                                                   /etc/caddy/Caddyfile
-COPY entrypoint.sh                                               /entrypoint.sh
-RUN chmod +x /entrypoint.sh /usr/local/bin/docmind-server /usr/local/bin/caddy
+# Server artifacts: dist/ + node_modules/ (production-only after `npm prune`)
+COPY --from=server-build /server/dist          /app/dist
+COPY --from=server-build /server/node_modules  /app/node_modules
+COPY --from=server-build /server/package.json  /app/package.json
 
-# Axum 监听 8081(loopback),Caddy 监听 8080(对外)
-ENV DATA_DIR=/data \
-    LISTEN_ADDR=127.0.0.1:8081 \
+# Portal static
+COPY --from=portal-build /portal/dist          /app/portal
+
+ENV NODE_ENV=production \
+    DATA_DIR=/data \
+    HOST=0.0.0.0 \
+    PORT=8080 \
+    PORTAL_ROOT=/app/portal \
     DOMAIN=doc-api.boyobang.com \
-    PORTAL_DOMAIN=doc-web.boyobang.com \
-    PORTAL_ROOT=/app/portal
+    PORTAL_DOMAIN=doc-web.boyobang.com
 
 EXPOSE 8080
-
 VOLUME ["/data"]
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "dist/index.js"]
