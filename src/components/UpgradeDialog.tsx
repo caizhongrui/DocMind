@@ -301,7 +301,7 @@ export default function UpgradeDialog() {
       footer={null}
       width={460}
       centered
-      maskClosable
+      mask={{ closable: true }}
       destroyOnHidden
     >
       <div style={{ padding: "8px 4px" }}>
@@ -345,7 +345,7 @@ export default function UpgradeDialog() {
             <span style={{ fontSize: 24, fontWeight: 700, color: "var(--color-text)" }}>¥20</span>
             <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>终身买断</span>
           </div>
-          <Space direction="vertical" size={4} style={{ fontSize: 12 }}>
+          <Space orientation="vertical" size={4} style={{ fontSize: 12 }}>
             {[
               "无限 AI 问答 / 语义搜索",
               "全部模型档位（0.6B / 1.7B / 4B）+ 自定义 GGUF",
