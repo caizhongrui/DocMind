@@ -9,8 +9,11 @@ import {
   MailOutlined,
   CopyOutlined,
   CompassOutlined,
+  CloudDownloadOutlined,
 } from "@ant-design/icons";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { getVersion } from "@tauri-apps/api/app";
+import { triggerUpdateCheck } from "./UpdateNotifier";
 
 interface Props {
   open: boolean;
@@ -122,6 +125,11 @@ const DRAWER_STYLES = {
 
 export default function HelpDrawer({ open, onClose, onStartTour }: Props) {
   const [copied, setCopied] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>("");
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => setAppVersion(""));
+  }, []);
 
   const copyEmail = () => {
     navigator.clipboard.writeText(CONTACT_EMAIL).then(() => {
@@ -326,10 +334,27 @@ export default function HelpDrawer({ open, onClose, onStartTour }: Props) {
         </div>
       )}
 
+      <div style={{ textAlign: "center", marginBottom: 12 }}>
+        <Button
+          type="default"
+          size="small"
+          icon={<CloudDownloadOutlined />}
+          onClick={triggerUpdateCheck}
+          style={{ borderRadius: 6, fontSize: 12 }}
+        >
+          检查更新
+        </Button>
+      </div>
+
       <div style={{ textAlign: "center", marginTop: 4, marginBottom: 8 }}>
         <Typography.Text type="secondary" style={{ fontSize: 11 }}>
           DocMind · 本地文档全文搜索 · AI 语义检索 · 文档问答
         </Typography.Text>
+        {appVersion && (
+          <div className="mono" style={{ fontSize: 10, color: "var(--color-text-muted)", marginTop: 2 }}>
+            v{appVersion}
+          </div>
+        )}
       </div>
     </Drawer>
   );

@@ -1,8 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { Modal, Button, Progress, Typography, Space } from "antd";
+import { Modal, Button, Progress, Typography, Space, message as antdMessage } from "antd";
 import { CloudDownloadOutlined } from "@ant-design/icons";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+
+/**
+ * Trigger an immediate update check from anywhere in the UI.
+ * UpdateNotifier listens for `docmind-check-update`; pass `manual: true`
+ * in the event detail so the result is surfaced even when up-to-date.
+ */
+export function triggerUpdateCheck() {
+  window.dispatchEvent(
+    new CustomEvent("docmind-check-update", { detail: { manual: true } }),
+  );
+}
 
 /**
  * Background updater. Pings the server's `/api/v1/updates/...` endpoint
@@ -41,34 +52,47 @@ export default function UpdateNotifier() {
   const [error, setError] = useState<string | null>(null);
   const isCheckingRef = useRef(false);
 
-  // Periodic + startup check.
+  // Periodic + startup + manual check. Manual = noisy (toast on
+  // up-to-date / error); background = silent.
   useEffect(() => {
     let cancelled = false;
-    const runCheck = async () => {
+    const runCheck = async (manual: boolean) => {
       if (isCheckingRef.current || cancelled) return;
       isCheckingRef.current = true;
+      if (manual) antdMessage.loading({ content: "正在检查更新…", key: "upd-check" });
       try {
         const u = await check();
         if (cancelled) return;
-        if (!u) return; // up to date
-        if (loadSkipped().has(u.version)) return; // user said no thanks
+        if (!u) {
+          if (manual) antdMessage.success({ content: "已是最新版本", key: "upd-check" });
+          return;
+        }
+        // Manual check ignores skip-list — the user explicitly asked.
+        if (!manual && loadSkipped().has(u.version)) return;
+        if (manual) antdMessage.destroy("upd-check");
         setUpdate(u);
         setPhase("available");
       } catch (e) {
-        // Quietly swallow check errors — server may be unreachable in dev.
-        // Surface only when the user explicitly retries.
+        const msg = e instanceof Error ? e.message : String(e);
         console.warn("[updater] check failed:", e);
+        if (manual) antdMessage.error({ content: `检查失败: ${msg}`, key: "upd-check" });
       } finally {
         isCheckingRef.current = false;
       }
     };
 
-    const t1 = setTimeout(runCheck, FIRST_CHECK_DELAY_MS);
-    const t2 = setInterval(runCheck, PERIODIC_CHECK_INTERVAL_MS);
+    const t1 = setTimeout(() => runCheck(false), FIRST_CHECK_DELAY_MS);
+    const t2 = setInterval(() => runCheck(false), PERIODIC_CHECK_INTERVAL_MS);
+    const onManual = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ manual?: boolean }>).detail;
+      runCheck(detail?.manual ?? true);
+    };
+    window.addEventListener("docmind-check-update", onManual);
     return () => {
       cancelled = true;
       clearTimeout(t1);
       clearInterval(t2);
+      window.removeEventListener("docmind-check-update", onManual);
     };
   }, []);
 
