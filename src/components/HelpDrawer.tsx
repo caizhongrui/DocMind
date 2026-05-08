@@ -10,10 +10,14 @@ import {
   CopyOutlined,
   CompassOutlined,
   CloudDownloadOutlined,
+  GlobalOutlined,
 } from "@ant-design/icons";
 import { useState, useEffect } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import { triggerUpdateCheck } from "./UpdateNotifier";
+
+const PORTAL_URL = "https://doc-web.boyobang.com";
 
 interface Props {
   open: boolean;
@@ -126,10 +130,24 @@ const DRAWER_STYLES = {
 export default function HelpDrawer({ open, onClose, onStartTour }: Props) {
   const [copied, setCopied] = useState(false);
   const [appVersion, setAppVersion] = useState<string>("");
+  const [siteCopied, setSiteCopied] = useState(false);
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => setAppVersion(""));
   }, []);
+
+  const copySite = () => {
+    navigator.clipboard.writeText(PORTAL_URL).then(() => {
+      setSiteCopied(true);
+      setTimeout(() => setSiteCopied(false), 2000);
+    });
+  };
+
+  const openSite = () => {
+    invoke("plugin:opener|open_url", { url: PORTAL_URL }).catch(() => {
+      window.open(PORTAL_URL, "_blank");
+    });
+  };
 
   const copyEmail = () => {
     navigator.clipboard.writeText(CONTACT_EMAIL).then(() => {
@@ -281,6 +299,47 @@ export default function HelpDrawer({ open, onClose, onStartTour }: Props) {
               </Typography.Text>
             </div>
           ))}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "8px 12px",
+            borderRadius: 6,
+            background: "var(--color-surface-elevated)",
+            border: "1px solid var(--color-border)",
+            marginBottom: 8,
+          }}
+        >
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flex: 1, minWidth: 0 }}
+            onClick={openSite}
+            title="点击打开"
+          >
+            <GlobalOutlined style={{ color: "var(--color-text-secondary)", fontSize: 13 }} />
+            <Typography.Text
+              className="mono"
+              style={{
+                fontSize: 12,
+                fontWeight: 500,
+                color: "var(--color-primary)",
+                userSelect: "all",
+              }}
+            >
+              {PORTAL_URL.replace(/^https?:\/\//, "")}
+            </Typography.Text>
+          </div>
+          <Button
+            type="text"
+            size="small"
+            icon={<CopyOutlined style={{ fontSize: 12 }} />}
+            onClick={copySite}
+            style={{ color: siteCopied ? "#16a34a" : "var(--color-text-muted)", padding: "0 6px" }}
+          >
+            <span style={{ fontSize: 11 }}>{siteCopied ? "已复制" : "复制"}</span>
+          </Button>
         </div>
 
         <div
