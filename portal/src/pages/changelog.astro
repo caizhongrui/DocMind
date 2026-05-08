@@ -1,7 +1,7 @@
 ---
 import Layout from "../layouts/Layout.astro";
 
-// At build time we'd fetch from api.docmind.app/api/v1/releases/public.
+// At build time we'd fetch from doc-api.boyobang.com/api/v1/releases/public.
 // For the first build the server might not exist yet, so we ship a fallback
 // list and show that. The fetch is wrapped in a try/catch.
 let releases: Array<{ version: string; published_at: string; notes: string }> = [
@@ -20,7 +20,7 @@ let releases: Array<{ version: string; published_at: string; notes: string }> = 
 ];
 
 try {
-  const r = await fetch("https://api.docmind.app/api/v1/releases/public");
+  const r = await fetch("https://doc-api.boyobang.com/api/v1/releases/public");
   if (r.ok) {
     const fetched = (await r.json()) as typeof releases;
     if (Array.isArray(fetched) && fetched.length > 0) {

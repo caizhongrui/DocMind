@@ -2,7 +2,7 @@ import { defineConfig } from "astro/config";
 import tailwind from "@astrojs/tailwind";
 
 export default defineConfig({
-  site: "https://docmind.app",
+  site: "https://doc-web.boyobang.com",
   integrations: [tailwind()],
   build: {
     format: "directory",

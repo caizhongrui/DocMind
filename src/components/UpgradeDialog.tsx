@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useLicenseStore } from "../stores/licenseStore";
 
-const PORTAL_PRICING_URL = "https://docmind.app/pricing";
+const PORTAL_PRICING_URL = "https://doc-web.boyobang.com/pricing";
 
 const REASON_TITLE: Record<string, string> = {
   custom_gguf: "导入自定义模型 — Pro 功能",
@@ -69,7 +69,7 @@ export default function UpgradeDialog() {
     setActivating(true);
     try {
       const fingerprint = await invoke<string>("get_hardware_fingerprint");
-      const apiBase = "https://api.docmind.app";
+      const apiBase = "https://doc-api.boyobang.com";
       const resp = await fetch(`${apiBase}/api/v1/license/activate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

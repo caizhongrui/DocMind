@@ -24,13 +24,13 @@ services:
     environment:
       DATA_DIR: /data
       LISTEN_ADDR: 127.0.0.1:8080
-      DOMAIN: ${DOMAIN:-api.docmind.app}
-      PORTAL_DOMAIN: ${PORTAL_DOMAIN:-docmind.app}
+      DOMAIN: ${DOMAIN:-doc-api.boyobang.com}
+      PORTAL_DOMAIN: ${PORTAL_DOMAIN:-doc-web.boyobang.com}
       ACME_EMAIL: ${ACME_EMAIL}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       PAYJS_MERCHANT_ID: ${PAYJS_MERCHANT_ID}
       PAYJS_KEY: ${PAYJS_KEY}
-      PAYJS_NOTIFY_URL: ${PAYJS_NOTIFY_URL:-https://api.docmind.app/api/v1/payment/payjs/webhook}
+      PAYJS_NOTIFY_URL: ${PAYJS_NOTIFY_URL:-https://doc-api.boyobang.com/api/v1/payment/payjs/webhook}
       PRICE_LIFETIME_FEN: ${PRICE_LIFETIME_FEN:-2000}
       RUST_LOG: ${RUST_LOG:-info,docmind_server=debug}

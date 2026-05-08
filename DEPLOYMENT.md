@@ -4,7 +4,7 @@ DocMind 的 license 服务、PayJS 支付回调、Tauri 自动更新、营销门
 
 ## 准备
 
-- 已备案的域名,比如 `docmind.app` + `api.docmind.app`(子域)
+- 已备案的域名,比如 `doc-web.boyobang.com` + `doc-api.boyobang.com`(子域)
 - 一台 Linux 服务器(2C2G 起,30GB 磁盘),固定 IP
 - DNS A 记录把这两个域名都指向这台服务器
 - 防火墙开放 80 / 443 端口
@@ -56,14 +56,14 @@ pub const SERVER_PUBLIC_KEY_HEX: &str =
 
 1. 注册 https://payjs.cn 完成商户审核(个体户即可)
 2. 拿到 `商户号(MCHID)` 和 `密钥(KEY)`,填入 `.env`
-3. 在 PayJS 控制台填写"异步通知地址":`https://api.docmind.app/api/v1/payment/payjs/webhook`
+3. 在 PayJS 控制台填写"异步通知地址":`https://doc-api.boyobang.com/api/v1/payment/payjs/webhook`
 4. 测试一笔 ¥0.01 订单,在 `/admin/orders` 应能看到记录
 
 ## 上传第一个版本
 
 1. 用 GitHub Actions / 本地 `npm run tauri build` 构建 macOS / Windows 安装包
 2. 拿到二进制和 `.sig` 文件(Tauri updater 用)
-3. 浏览器访问 `https://api.docmind.app/admin/releases`
+3. 浏览器访问 `https://doc-api.boyobang.com/admin/releases`
 4. 在"上传新版本"表单填好版本号 / 平台 / edition,选择二进制和 .sig,提交
 5. 完成后客户端通过 `/api/v1/updates/{platform}/{cur_ver}` 自动检测到新版本
 

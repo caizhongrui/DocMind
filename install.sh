@@ -38,20 +38,20 @@ if [ ! -f .env ]; then
     cp .env.example .env
     echo "[install] Wrote .env. Filling in required values..."
 
-    read -rp "domain for API server [api.docmind.app]: " api_dom
-    read -rp "domain for portal site [docmind.app]: " portal_dom
+    read -rp "domain for API server [doc-api.boyobang.com]: " api_dom
+    read -rp "domain for portal site [doc-web.boyobang.com]: " portal_dom
     read -rp "ACME email (Let's Encrypt notifications): " acme
     read -rsp "admin password for /admin: " admin_pw; echo
     read -rp "PayJS merchant ID (leave blank to set later): " payjs_mid
     read -rsp "PayJS merchant key (leave blank to set later): " payjs_key; echo
 
-    sed -i "s|^DOMAIN=.*|DOMAIN=${api_dom:-api.docmind.app}|" .env
-    sed -i "s|^PORTAL_DOMAIN=.*|PORTAL_DOMAIN=${portal_dom:-docmind.app}|" .env
+    sed -i "s|^DOMAIN=.*|DOMAIN=${api_dom:-doc-api.boyobang.com}|" .env
+    sed -i "s|^PORTAL_DOMAIN=.*|PORTAL_DOMAIN=${portal_dom:-doc-web.boyobang.com}|" .env
     sed -i "s|^ACME_EMAIL=.*|ACME_EMAIL=${acme}|" .env
     sed -i "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=${admin_pw}|" .env
     sed -i "s|^PAYJS_MERCHANT_ID=.*|PAYJS_MERCHANT_ID=${payjs_mid}|" .env
     sed -i "s|^PAYJS_KEY=.*|PAYJS_KEY=${payjs_key}|" .env
-    sed -i "s|^PAYJS_NOTIFY_URL=.*|PAYJS_NOTIFY_URL=https://${api_dom:-api.docmind.app}/api/v1/payment/payjs/webhook|" .env
+    sed -i "s|^PAYJS_NOTIFY_URL=.*|PAYJS_NOTIFY_URL=https://${api_dom:-doc-api.boyobang.com}/api/v1/payment/payjs/webhook|" .env
 fi
 
 echo "[install] Building & starting docmind-server..."

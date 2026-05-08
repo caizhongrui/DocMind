@@ -1,6 +1,6 @@
-//! Public-facing pages on `api.docmind.app`.
+//! Public-facing pages on `doc-api.boyobang.com`.
 //!
-//! - `/`           Tiny stub (the marketing portal lives at docmind.app).
+//! - `/`           Tiny stub (the marketing portal lives at doc-web.boyobang.com).
 //! - `/activate`   The page the desktop client links users to when they want
 //!                 to type in their license key in a browser instead of
 //!                 inside the app. We render the form, accept the form post,
@@ -23,7 +23,7 @@ pub async fn root() -> Response {
   <h1>DocMind License Server</h1>
   <p style="color: var(--text-muted); font-size: 12px; line-height: 1.7;">
     这里是 DocMind 的 license / 更新 / 支付 后台。如果你在找产品页,请前往
-    <a href="https://docmind.app">docmind.app</a>。
+    <a href="https://doc-web.boyobang.com">doc-web.boyobang.com</a>。
   </p>
 </div>"#,
     )

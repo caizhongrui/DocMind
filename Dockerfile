@@ -8,8 +8,8 @@
 #   3. runtime       — Debian slim + Caddy + the two artifacts
 #
 # Final image is one container that:
-#   - serves api.docmind.app via Axum on :8080 behind Caddy reverse-proxy
-#   - serves docmind.app as static files from /app/portal
+#   - serves doc-api.boyobang.com via Axum on :8080 behind Caddy reverse-proxy
+#   - serves doc-web.boyobang.com as static files from /app/portal
 #   - persists state under /data (mount this as a volume)
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -77,8 +77,8 @@ RUN chmod +x /entrypoint.sh /usr/local/bin/docmind-server
 # Default config — override at runtime
 ENV DATA_DIR=/data \
     LISTEN_ADDR=127.0.0.1:8080 \
-    DOMAIN=api.docmind.app \
-    PORTAL_DOMAIN=docmind.app
+    DOMAIN=doc-api.boyobang.com \
+    PORTAL_DOMAIN=doc-web.boyobang.com
 
 EXPOSE 80 443
 

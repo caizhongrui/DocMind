@@ -34,7 +34,7 @@ impl Config {
         std::fs::create_dir_all(&releases_dir)?;
 
         Ok(Self {
-            domain: envv("DOMAIN", "api.docmind.app"),
+            domain: envv("DOMAIN", "doc-api.boyobang.com"),
             listen_addr: envv("LISTEN_ADDR", "0.0.0.0:8080"),
             data_dir,
             db_path,

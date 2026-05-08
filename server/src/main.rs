@@ -6,8 +6,8 @@
 //! - `/releases/*`      — static binary downloads with logging
 //! - `/activate`        — public activation flow (HTML)
 //!
-//! The portal site (`docmind.app`) is served separately by Caddy as a static
-//! Astro build; this server only serves `api.docmind.app`.
+//! The portal site (`doc-web.boyobang.com`) is served separately by Caddy as a static
+//! Astro build; this server only serves `doc-api.boyobang.com`.
 
 mod config;
 mod db;
