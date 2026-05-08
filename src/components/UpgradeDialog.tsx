@@ -61,6 +61,12 @@ export default function UpgradeDialog() {
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const refreshLicense = useLicenseStore((s) => s.refresh);
 
+  // Trial start flow. (Hooks must live above the `if (!visible)` early
+  // return — moving them below trips React's "more hooks than last
+  // render" guard.)
+  const [startingTrial, setStartingTrial] = useState(false);
+  const [trialError, setTrialError] = useState<string | null>(null);
+
   const visible = upgradeRequest !== null;
 
   useEffect(() => {
@@ -199,8 +205,6 @@ export default function UpgradeDialog() {
     setPaymentError(null);
   };
 
-  const [startingTrial, setStartingTrial] = useState(false);
-  const [trialError, setTrialError] = useState<string | null>(null);
   const trialEligible = status?.plan === "free" && status?.reason === "no_trial_yet";
 
   const handleStartTrial = async () => {
