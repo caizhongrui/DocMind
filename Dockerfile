@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.6
-#
 # DocMind self-hosted backend(API + 门户站,单容器)
 #
 # 部署模式:
@@ -16,7 +14,7 @@
 # ────────────────────────────────────────────────────────────────────────────
 # Stage 1: Portal (Astro)
 # ────────────────────────────────────────────────────────────────────────────
-FROM node:20-alpine AS portal-build
+FROM docker.m.daocloud.io/library/node:20-alpine AS portal-build
 WORKDIR /portal
 COPY portal/package.json portal/package-lock.json* ./
 RUN npm install --no-audit --no-fund
@@ -27,7 +25,7 @@ RUN npm run build
 # ────────────────────────────────────────────────────────────────────────────
 # Stage 2: Server (Rust + Axum)
 # ────────────────────────────────────────────────────────────────────────────
-FROM rust:1.83-slim AS server-build
+FROM docker.m.daocloud.io/library/rust:1.86-slim AS server-build
 WORKDIR /server
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -43,18 +41,18 @@ RUN touch src/main.rs && cargo build --release
 # ────────────────────────────────────────────────────────────────────────────
 # Stage 3: Runtime
 # ────────────────────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim AS runtime
+FROM docker.m.daocloud.io/library/debian:bookworm-slim AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         tini \
         curl \
-        debian-keyring debian-archive-keyring apt-transport-https gnupg \
-    && curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
-    && curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list \
-    && apt-get update && apt-get install -y --no-install-recommends caddy \
-    && apt-get purge -y --auto-remove gnupg debian-keyring debian-archive-keyring apt-transport-https \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy the official Caddy binary directly — Go static binary, works on any
+# glibc system. Avoids adding the cloudsmith apt repo (which breaks against
+# the daocloud-mirrored debian image due to keyring deps).
+COPY --from=docker.m.daocloud.io/library/caddy:2.10-alpine /usr/bin/caddy /usr/local/bin/caddy
 
 WORKDIR /app
 
@@ -62,7 +60,7 @@ COPY --from=portal-build /portal/dist                            /app/portal
 COPY --from=server-build /server/target/release/docmind-server   /usr/local/bin/docmind-server
 COPY Caddyfile                                                   /etc/caddy/Caddyfile
 COPY entrypoint.sh                                               /entrypoint.sh
-RUN chmod +x /entrypoint.sh /usr/local/bin/docmind-server
+RUN chmod +x /entrypoint.sh /usr/local/bin/docmind-server /usr/local/bin/caddy
 
 # Axum 监听 8081(loopback),Caddy 监听 8080(对外)
 ENV DATA_DIR=/data \
