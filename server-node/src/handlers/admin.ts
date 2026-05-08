@@ -400,29 +400,48 @@ adminRouter.get("/downloads", (c) => {
 });
 
 // ── Releases ───────────────────────────────────────────────────────────────
+const SUPPORTED_PLATFORMS: Array<{ value: string; label: string }> = [
+  { value: "darwin-aarch64", label: "macOS (Apple Silicon · M 系列)" },
+  { value: "darwin-x86_64", label: "macOS (Intel)" },
+  { value: "windows-x86_64", label: "Windows 64-bit" },
+  { value: "windows-aarch64", label: "Windows ARM64" },
+  { value: "linux-x86_64", label: "Linux x86_64" },
+  { value: "linux-aarch64", label: "Linux ARM64" },
+];
+
 adminRouter.get("/releases", (c) => {
   const guard = requireSession(c);
   if (guard !== true) return guard;
-  const { db } = c.var.app;
+  const { db, config } = c.var.app;
   const rows = db
     .prepare(
-      `SELECT version, platform, edition, file_path, size, published_at
+      `SELECT version, platform, file_path, size, published_at
          FROM releases ORDER BY published_at DESC LIMIT 100`,
     )
     .all() as Array<{
     version: string;
     platform: string;
-    edition: string;
     file_path: string;
     size: number;
     published_at: string;
   }>;
   const tbody = rows
-    .map(
-      (r) =>
-        `<tr><td class="mono">${htmlEscape(r.version)}</td><td class="mono">${htmlEscape(r.platform)}</td><td>${htmlEscape(r.edition)}</td><td class="mono">${htmlEscape(r.file_path)}</td><td class="mono">${(r.size / (1024 * 1024)).toFixed(1)} MB</td></tr>`,
-    )
+    .map((r) => {
+      const url = `https://${config.domain}/releases/${encodeURIComponent(r.platform)}/${encodeURIComponent(r.file_path)}`;
+      return `<tr>
+  <td class="mono">${htmlEscape(r.version)}</td>
+  <td class="mono">${htmlEscape(r.platform)}</td>
+  <td class="mono">${htmlEscape(r.file_path)}</td>
+  <td class="mono">${(r.size / (1024 * 1024)).toFixed(1)} MB</td>
+  <td><a class="mono" href="${htmlEscape(url)}" target="_blank" rel="noopener">下载</a></td>
+</tr>`;
+    })
     .join("");
+
+  const platformOptions = SUPPORTED_PLATFORMS.map(
+    (p) => `<option value="${htmlEscape(p.value)}">${htmlEscape(p.label)}</option>`,
+  ).join("");
+
   const body = `
 <h1>版本管理</h1>
 <div class="card">
@@ -430,8 +449,7 @@ adminRouter.get("/releases", (c) => {
   <form method="POST" action="/admin/releases" enctype="multipart/form-data">
     <div class="row" style="gap: 12px; flex-wrap: wrap; margin-bottom: 8px;">
       <input name="version" placeholder="版本号 e.g. 0.2.0" required>
-      <input name="platform" placeholder="平台 e.g. darwin-aarch64" required>
-      <select name="edition"><option value="free">free</option><option value="pro">pro</option></select>
+      <select name="platform" required>${platformOptions}</select>
     </div>
     <div class="row" style="gap: 12px; margin-bottom: 8px;">
       <input type="file" name="binary" required>
@@ -442,8 +460,8 @@ adminRouter.get("/releases", (c) => {
   </form>
 </div>
 <table>
-  <thead><tr><th>版本</th><th>平台</th><th>类型</th><th>文件名</th><th>大小</th></tr></thead>
-  <tbody>${tbody}</tbody>
+  <thead><tr><th>版本</th><th>平台</th><th>文件名</th><th>大小</th><th>下载</th></tr></thead>
+  <tbody>${tbody || `<tr><td colspan="5" style="text-align:center; padding:20px;">暂无发布</td></tr>`}</tbody>
 </table>`;
   return c.html(layout("版本", body));
 });
@@ -456,15 +474,19 @@ adminRouter.post("/releases", async (c) => {
   const form = await c.req.formData();
   const version = String(form.get("version") ?? "");
   const platform = String(form.get("platform") ?? "");
-  const edition = String(form.get("edition") ?? "free");
   const notes = String(form.get("notes") ?? "");
   const signature = String(form.get("signature") ?? "");
   const binary = form.get("binary");
   if (!version || !platform) return c.text("version + platform required", 400);
+  if (!SUPPORTED_PLATFORMS.some((p) => p.value === platform)) {
+    return c.text("unsupported platform", 400);
+  }
   if (!(binary instanceof File) || binary.size === 0) {
     return c.text("missing binary", 400);
   }
 
+  // 单一 edition 'all',兼容旧 schema 的 UNIQUE(version, platform, edition)
+  const edition = "all";
   const dir = join(config.releasesDir, edition, platform);
   mkdirSync(dir, { recursive: true });
   const filename = binary.name;
@@ -485,6 +507,101 @@ adminRouter.post("/releases", async (c) => {
   ).run(version, platform, edition, filename, sha, bytes.length, signature, notes);
 
   return c.redirect("/admin/releases");
+});
+
+// ── Portal access logs ────────────────────────────────────────────────────
+adminRouter.get("/portal", (c) => {
+  const guard = requireSession(c);
+  if (guard !== true) return guard;
+  const { db } = c.var.app;
+
+  const totalToday =
+    (db.prepare(`SELECT COUNT(*) AS n FROM portal_access WHERE ts >= date('now')`).get() as { n: number }).n;
+  const totalMonth =
+    (db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM portal_access WHERE ts >= date('now', 'start of month')`,
+      )
+      .get() as { n: number }).n;
+  const total =
+    (db.prepare(`SELECT COUNT(*) AS n FROM portal_access`).get() as { n: number }).n;
+
+  const rows = db
+    .prepare(
+      `SELECT ts, method, path, status, ip, user_agent, referer
+         FROM portal_access ORDER BY ts DESC LIMIT 200`,
+    )
+    .all() as Array<{
+    ts: string;
+    method: string;
+    path: string;
+    status: number;
+    ip: string;
+    user_agent: string | null;
+    referer: string | null;
+  }>;
+  const tbody = rows
+    .map((r) => {
+      const refDisplay = r.referer
+        ? r.referer.length > 60
+          ? r.referer.slice(0, 60) + "…"
+          : r.referer
+        : "—";
+      const uaDisplay = r.user_agent
+        ? r.user_agent.length > 50
+          ? r.user_agent.slice(0, 50) + "…"
+          : r.user_agent
+        : "—";
+      return `<tr>
+  <td>${htmlEscape(formatDate(r.ts) ?? "—")}</td>
+  <td class="mono">${htmlEscape(r.method)}</td>
+  <td class="mono">${htmlEscape(r.path)}</td>
+  <td class="mono">${r.status}</td>
+  <td class="mono">${htmlEscape(r.ip)}</td>
+  <td title="${htmlEscape(r.user_agent ?? "")}">${htmlEscape(uaDisplay)}</td>
+  <td title="${htmlEscape(r.referer ?? "")}">${htmlEscape(refDisplay)}</td>
+</tr>`;
+    })
+    .join("");
+
+  const topPaths = db
+    .prepare(
+      `SELECT path, COUNT(*) AS n FROM portal_access
+         WHERE ts >= date('now', 'start of month')
+         GROUP BY path ORDER BY n DESC LIMIT 10`,
+    )
+    .all() as Array<{ path: string; n: number }>;
+  const topTbody = topPaths
+    .map(
+      (p) =>
+        `<tr><td class="mono">${htmlEscape(p.path)}</td><td class="mono">${p.n}</td></tr>`,
+    )
+    .join("");
+
+  const body = `
+<h1>门户访问日志</h1>
+<div class="stat-grid" style="grid-template-columns: repeat(3, 1fr);">
+  <div class="stat"><div class="stat-label">今日访问</div><div class="stat-value">${totalToday}</div></div>
+  <div class="stat"><div class="stat-label">本月访问</div><div class="stat-value">${totalMonth}</div></div>
+  <div class="stat"><div class="stat-label">累计</div><div class="stat-value">${total}</div></div>
+</div>
+
+<div class="card">
+  <h2>本月热门路径</h2>
+  <table>
+    <thead><tr><th>路径</th><th>访问次数</th></tr></thead>
+    <tbody>${topTbody || `<tr><td colspan="2" style="text-align:center; padding:20px;">暂无数据</td></tr>`}</tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>最近 200 条</h2>
+  <table>
+    <thead><tr><th>时间</th><th>方法</th><th>路径</th><th>状态</th><th>IP</th><th>UA</th><th>来源</th></tr></thead>
+    <tbody>${tbody || `<tr><td colspan="7" style="text-align:center; padding:20px;">暂无数据</td></tr>`}</tbody>
+  </table>
+</div>`;
+  return c.html(layout("门户访问", body));
 });
 
 // ── helpers ────────────────────────────────────────────────────────────────

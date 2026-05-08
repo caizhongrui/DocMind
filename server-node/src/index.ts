@@ -52,40 +52,71 @@ async function main() {
   });
 
   // Portal static files (only when Host matches the portal domain).
-  if (existsSync(PORTAL_ROOT)) {
-    app.use("*", async (c, next) => {
-      const host = (c.req.header("host") ?? "").toLowerCase().split(":")[0];
-      if (host === config.portalDomain.toLowerCase()) {
-        // Try the file first; if it doesn't exist, fall back to /index.html
-        // so direct navigation to /pricing etc still works.
-        const handler = serveStatic({ root: PORTAL_ROOT });
-        const res = await handler(c, async () => {});
-        if (res && (res as Response).status !== 404) return res;
-        // Astro produces directory-style routes — try {path}/index.html
-        const path = new URL(c.req.url).pathname;
-        if (!path.endsWith("/")) {
-          const idx = serveStatic({
-            root: PORTAL_ROOT,
-            rewriteRequestPath: () => `${path}/index.html`,
-          });
-          const res2 = await idx(c, async () => {});
-          if (res2 && (res2 as Response).status !== 404) return res2;
-        }
-        // Final fallback to the SPA root.
-        const fallback = serveStatic({
-          root: PORTAL_ROOT,
-          rewriteRequestPath: () => "/index.html",
-        });
-        const res3 = await fallback(c, async () => {});
-        if (res3) return res3;
-      }
-      return next();
-    });
-  } else {
+  // Each request that hits the portal is logged into `portal_access`.
+  const portalAvailable = existsSync(PORTAL_ROOT);
+  if (!portalAvailable) {
     console.warn(
       `[server] PORTAL_ROOT ${PORTAL_ROOT} not found — portal will 404.`,
     );
   }
+
+  app.use("*", async (c, next) => {
+    const host = (c.req.header("host") ?? "").toLowerCase().split(":")[0];
+    if (host !== config.portalDomain.toLowerCase()) return next();
+    if (!portalAvailable) return next();
+
+    // Skip serving / logging non-portal paths (caller is hitting the wrong
+    // subdomain). Returning 404 is more honest than silently 200ing the SPA.
+    const reqPath = new URL(c.req.url).pathname;
+    const isApiOrAdmin =
+      reqPath.startsWith("/api/") ||
+      reqPath.startsWith("/admin") ||
+      reqPath.startsWith("/payment/") ||
+      reqPath.startsWith("/releases/") ||
+      reqPath === "/activate";
+    if (isApiOrAdmin) {
+      return c.text("Not found on portal domain — try doc-api host", 404);
+    }
+
+    const ip = clientIp(c);
+    const ua = c.req.header("user-agent") ?? null;
+    const referer = c.req.header("referer") ?? null;
+
+    // Try direct file → /index.html in directory → SPA fallback to /
+    const handler = serveStatic({ root: PORTAL_ROOT });
+    let res = await handler(c, async () => {});
+    if (!res || (res as Response).status === 404) {
+      if (!reqPath.endsWith("/")) {
+        const idx = serveStatic({
+          root: PORTAL_ROOT,
+          rewriteRequestPath: () => `${reqPath}/index.html`,
+        });
+        const r2 = await idx(c, async () => {});
+        if (r2 && (r2 as Response).status !== 404) res = r2;
+      }
+    }
+    if (!res || (res as Response).status === 404) {
+      const fallback = serveStatic({
+        root: PORTAL_ROOT,
+        rewriteRequestPath: () => "/index.html",
+      });
+      res = (await fallback(c, async () => {})) ?? res;
+    }
+
+    const status = res ? (res as Response).status : 404;
+    const lenHeader = res ? (res as Response).headers.get("content-length") : null;
+    const bytes = lenHeader ? parseInt(lenHeader, 10) : null;
+    try {
+      db.prepare(
+        `INSERT INTO portal_access (method, path, status, ip, user_agent, referer, bytes_served)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(c.req.method, reqPath, status, ip, ua, referer, bytes);
+    } catch (e) {
+      console.warn("[portal_access] log failed:", e);
+    }
+    if (res) return res;
+    return c.text("Not Found", 404);
+  });
 
   // API surface (mounted unconditionally — the portal middleware above
   // short-circuits doc-web requests before they reach here).
@@ -115,4 +146,12 @@ main().catch((e) => {
   console.error("[server] fatal:", e);
   process.exit(1);
 });
+
+function clientIp(c: any): string {
+  const xff = c.req.header("x-forwarded-for") as string | undefined;
+  if (xff) return xff.split(",")[0]!.trim();
+  const xri = c.req.header("x-real-ip") as string | undefined;
+  if (xri) return xri.trim();
+  return "?";
+}
 

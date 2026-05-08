@@ -76,6 +76,21 @@ export function applyMigrations(db: Database) {
       created_at  TEXT NOT NULL DEFAULT (datetime('now')),
       expires_at  TEXT NOT NULL
     );
+
+    -- 门户站访问日志(每次 doc-web 请求一条)
+    CREATE TABLE IF NOT EXISTS portal_access (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts            TEXT NOT NULL DEFAULT (datetime('now')),
+      method        TEXT NOT NULL,
+      path          TEXT NOT NULL,
+      status        INTEGER NOT NULL,
+      ip            TEXT NOT NULL,
+      user_agent    TEXT,
+      referer       TEXT,
+      bytes_served  INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_portal_access_ts ON portal_access(ts);
+    CREATE INDEX IF NOT EXISTS idx_portal_access_path ON portal_access(path);
   `);
 
   // Forward migrations for existing installs (post-schema additions).
