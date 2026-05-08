@@ -153,20 +153,28 @@ pub fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
-/// Convert a legacy .doc / .ppt to its modern OOXML counterpart
-/// (.docx / .pptx) and return the bytes base64-encoded. The front-end
-/// then routes the result through mammoth (.docx) or jszip (.pptx),
-/// the same renderers used for native modern Office files — so the
-/// preview fidelity matches.
+/// Result of converting a legacy Office file to something we can preview.
+/// `format` tells the front-end which renderer to feed the bytes to.
+#[derive(serde::Serialize)]
+pub struct LegacyConversion {
+    pub format: &'static str, // "pdf" | "docx" | "pptx"
+    pub base64: String,
+}
+
+/// Convert a legacy .doc / .ppt to the highest-fidelity preview format
+/// the host can produce.
 ///
-/// Strategy:
-///   - macOS .doc:           `textutil -convert docx`  (built-in)
-///   - macOS .ppt:           `soffice` (textutil can't do PowerPoint)
-///   - other platforms:      `soffice --convert-to <docx|pptx>`
+/// Preference order:
+///   1. **PDF via LibreOffice** (`soffice --convert-to pdf`) — perfect
+///      layout, images, fonts, tables. Rendered by the native PDF engine
+///      in WebKit so the user sees exactly what they'd see in Word.
+///   2. macOS .doc only: textutil .doc → .docx, fed back through
+///      mammoth. Fast and dependency-free but loses some formatting.
 ///
-/// Returns Err("NO_CONVERTER") if no tool is available.
+/// Returns Err("NO_CONVERTER") if neither is available — front-end can
+/// then fall back to plaintext.
 #[tauri::command]
-pub async fn convert_legacy_to_modern(path: String) -> Result<String, String> {
+pub async fn convert_legacy_to_modern(path: String) -> Result<LegacyConversion, String> {
     tokio::task::spawn_blocking(move || {
         use base64::Engine;
         use std::process::Command;
@@ -177,16 +185,11 @@ pub async fn convert_legacy_to_modern(path: String) -> Result<String, String> {
             .and_then(|e| e.to_str())
             .map(|e| e.to_ascii_lowercase())
             .unwrap_or_default();
+        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
 
-        let target_ext = match ext.as_str() {
-            "doc" => "docx",
-            "ppt" => "pptx",
-            other => return Err(format!("unsupported source extension: {other}")),
-        };
-        let stem = p
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("output");
+        if ext != "doc" && ext != "ppt" {
+            return Err(format!("unsupported source extension: {ext}"));
+        }
 
         let tmp = std::env::temp_dir().join(format!(
             "docmind-doc-convert-{}-{}",
@@ -194,45 +197,16 @@ pub async fn convert_legacy_to_modern(path: String) -> Result<String, String> {
             stem,
         ));
         let _ = std::fs::create_dir_all(&tmp);
-        let out_path = tmp.join(format!("{stem}.{target_ext}"));
 
-        // Pick converter.
-        let mut used_textutil = false;
-        #[cfg(target_os = "macos")]
-        if ext == "doc" {
-            // textutil handles .doc → .docx natively, no LibreOffice needed.
-            let r = Command::new("textutil")
-                .args([
-                    "-convert",
-                    target_ext,
-                    "-output",
-                    out_path.to_string_lossy().as_ref(),
-                    &path,
-                ])
-                .output()
-                .map_err(|e| format!("textutil 启动失败: {e}"))?;
-            if !r.status.success() {
-                let _ = std::fs::remove_dir_all(&tmp);
-                let stderr = String::from_utf8_lossy(&r.stderr);
-                return Err(format!("textutil 转换失败: {stderr}"));
-            }
-            used_textutil = true;
-        }
-
-        if !used_textutil {
-            // soffice (LibreOffice / OpenOffice headless). Probe first so we
-            // can return the stable NO_CONVERTER sentinel and let the
-            // front-end fall back gracefully.
-            let probe = Command::new("soffice").arg("--version").output();
-            if probe.is_err() || !probe.as_ref().map(|o| o.status.success()).unwrap_or(false) {
-                let _ = std::fs::remove_dir_all(&tmp);
-                return Err("NO_CONVERTER".to_string());
-            }
-            let r = Command::new("soffice")
+        // ── Tier 1: LibreOffice → PDF (highest fidelity). ─────────────
+        // Find soffice on PATH or in common /Applications location.
+        let soffice_bin = which_soffice();
+        if let Some(soffice) = soffice_bin {
+            let r = Command::new(&soffice)
                 .args([
                     "--headless",
                     "--convert-to",
-                    target_ext,
+                    "pdf",
                     "--outdir",
                     tmp.to_string_lossy().as_ref(),
                     &path,
@@ -244,15 +218,70 @@ pub async fn convert_legacy_to_modern(path: String) -> Result<String, String> {
                 let stderr = String::from_utf8_lossy(&r.stderr);
                 return Err(format!("soffice 转换失败: {stderr}"));
             }
+            let pdf_path = tmp.join(format!("{stem}.pdf"));
+            let bytes = std::fs::read(&pdf_path)
+                .map_err(|e| format!("读取 PDF 结果失败: {e}"))?;
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Ok(LegacyConversion {
+                format: "pdf",
+                base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+            });
         }
 
-        let bytes = std::fs::read(&out_path)
-            .map_err(|e| format!("读取转换结果失败: {e}"))?;
+        // ── Tier 2: macOS textutil (.doc → .docx only). ───────────────
+        #[cfg(target_os = "macos")]
+        if ext == "doc" {
+            let out_path = tmp.join(format!("{stem}.docx"));
+            let r = Command::new("textutil")
+                .args([
+                    "-convert",
+                    "docx",
+                    "-output",
+                    out_path.to_string_lossy().as_ref(),
+                    &path,
+                ])
+                .output()
+                .map_err(|e| format!("textutil 启动失败: {e}"))?;
+            if !r.status.success() {
+                let _ = std::fs::remove_dir_all(&tmp);
+                let stderr = String::from_utf8_lossy(&r.stderr);
+                return Err(format!("textutil 转换失败: {stderr}"));
+            }
+            let bytes = std::fs::read(&out_path)
+                .map_err(|e| format!("读取 docx 结果失败: {e}"))?;
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Ok(LegacyConversion {
+                format: "docx",
+                base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+            });
+        }
+
         let _ = std::fs::remove_dir_all(&tmp);
-        Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+        Err("NO_CONVERTER".to_string())
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Locate the LibreOffice CLI. PATH first, then well-known macOS bundle.
+fn which_soffice() -> Option<std::path::PathBuf> {
+    use std::process::Command;
+    if Command::new("soffice")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return Some("soffice".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let bundled = std::path::PathBuf::from("/Applications/LibreOffice.app/Contents/MacOS/soffice");
+        if bundled.exists() {
+            return Some(bundled);
+        }
+    }
+    None
 }
 
 /// 读取已保存的全局快捷键（None = 未设置）

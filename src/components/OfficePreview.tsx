@@ -174,10 +174,12 @@ export default function OfficePreview({ path, fileType }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [docHtml, setDocHtml] = useState<string | null>(null);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const [xlsxSheets, setXlsxSheets] = useState<XlsxSheet[]>([]);
   const [activeSheet, setActiveSheet] = useState(0);
   const [pptxSlides, setPptxSlides] = useState<PptxSlide[]>([]);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const prevPdfUrlRef = useRef<string | null>(null);
 
   const ft = fileType.toLowerCase();
 
@@ -186,6 +188,11 @@ export default function OfficePreview({ path, fileType }: Props) {
     setLoading(true);
     setError(null);
     setDocHtml(null);
+    setPdfBlobUrl(null);
+    if (prevPdfUrlRef.current) {
+      URL.revokeObjectURL(prevPdfUrlRef.current);
+      prevPdfUrlRef.current = null;
+    }
     setXlsxSheets([]);
     setActiveSheet(0);
     setPptxSlides([]);
@@ -197,24 +204,42 @@ export default function OfficePreview({ path, fileType }: Props) {
         const fmt = detectOfficeFormat(buffer);
 
         if (ft === "docx" || ft === "doc") {
-          let docxBuffer = buffer;
           if (fmt === "cfb") {
-            // Legacy Word97 .doc. Convert it to .docx via the system
-            // converter (textutil on macOS, soffice elsewhere) and run
-            // the result through the same mammoth path used for native
-            // .docx — fidelity matches.
+            // Legacy Word97 .doc — try a high-fidelity conversion path.
+            // The Rust side prefers LibreOffice → PDF when available
+            // (best fidelity), falling back to textutil → docx on
+            // macOS. PDFs are rendered by the native WebKit PDF engine,
+            // identical to opening the file in Preview.app.
             try {
-              const b64 = await invoke<string>("convert_legacy_to_modern", { path });
-              docxBuffer = base64ToArrayBuffer(b64);
+              const conv = await invoke<{ format: string; base64: string }>(
+                "convert_legacy_to_modern",
+                { path },
+              );
+              const buf = base64ToArrayBuffer(conv.base64);
+              if (conv.format === "pdf") {
+                const blob = new Blob([buf], { type: "application/pdf" });
+                const url = URL.createObjectURL(blob);
+                prevPdfUrlRef.current = url;
+                if (!cancelled) setPdfBlobUrl(url);
+              } else {
+                // docx — feed to mammoth, same as native .docx.
+                const mammoth = (await import("mammoth")).default;
+                const result = await mammoth.convertToHtml({ arrayBuffer: buf });
+                if (!cancelled) setDocHtml(buildDocxHtml(result.value));
+              }
             } catch (err) {
-              // No converter installed → fall back to plaintext extractor.
+              // No converter installed → text fallback + install hint.
               const text = await invoke<string>("read_file_preview", { path });
-              if (!cancelled) setDocHtml(buildPlainTextHtml(text, `Word 97-2003 (.doc) · 仅文本预览（${String(err)}）`));
-              return;
+              const banner = String(err) === "NO_CONVERTER"
+                ? "Word 97-2003 (.doc) · 仅文本预览。安装 LibreOffice 可获得完整版式预览（macOS: brew install --cask libreoffice）"
+                : `Word 97-2003 (.doc) · 仅文本预览（${String(err)}）`;
+              if (!cancelled) setDocHtml(buildPlainTextHtml(text, banner));
             }
+            return;
           }
+          // Native .docx
           const mammoth = (await import("mammoth")).default;
-          const result = await mammoth.convertToHtml({ arrayBuffer: docxBuffer });
+          const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
           if (!cancelled) setDocHtml(buildDocxHtml(result.value));
 
         } else if (ft === "xlsx" || ft === "xls" || ft === "csv") {
@@ -230,21 +255,42 @@ export default function OfficePreview({ path, fileType }: Props) {
           if (!cancelled) setXlsxSheets(sheets);
 
         } else if (ft === "pptx" || ft === "ppt") {
-          let pptxBuffer = buffer;
           if (fmt === "cfb") {
-            // Legacy PowerPoint97 — convert to .pptx and reuse the
-            // jszip-based slide parser.
+            // Legacy PowerPoint97 — same converter chain. soffice
+            // produces a perfect-fidelity PDF; without LibreOffice we
+            // can't do anything useful for .ppt (textutil doesn't
+            // handle PowerPoint), so the fallback is text-only.
             try {
-              const b64 = await invoke<string>("convert_legacy_to_modern", { path });
-              pptxBuffer = base64ToArrayBuffer(b64);
+              const conv = await invoke<{ format: string; base64: string }>(
+                "convert_legacy_to_modern",
+                { path },
+              );
+              const buf = base64ToArrayBuffer(conv.base64);
+              if (conv.format === "pdf") {
+                const blob = new Blob([buf], { type: "application/pdf" });
+                const url = URL.createObjectURL(blob);
+                prevPdfUrlRef.current = url;
+                if (!cancelled) setPdfBlobUrl(url);
+                return;
+              }
+              // Shouldn't normally hit this — Rust never emits
+              // pptx for legacy .ppt without soffice, but keep it
+              // defensive.
+              const JSZip = (await import("jszip")).default;
+              const zip = await JSZip.loadAsync(buf);
+              const slides = await parsePptxSlides(zip as import("jszip"));
+              if (!cancelled) setPptxSlides(slides);
             } catch (err) {
               const text = await invoke<string>("read_file_preview", { path });
-              if (!cancelled) setDocHtml(buildPlainTextHtml(text, `PowerPoint 97-2003 (.ppt) · 仅文本预览（${String(err)}）`));
-              return;
+              const banner = String(err) === "NO_CONVERTER"
+                ? "PowerPoint 97-2003 (.ppt) · 仅文本预览。安装 LibreOffice 可获得完整版式预览（macOS: brew install --cask libreoffice）"
+                : `PowerPoint 97-2003 (.ppt) · 仅文本预览（${String(err)}）`;
+              if (!cancelled) setDocHtml(buildPlainTextHtml(text, banner));
             }
+            return;
           }
           const JSZip = (await import("jszip")).default;
-          const zip = await JSZip.loadAsync(pptxBuffer);
+          const zip = await JSZip.loadAsync(buffer);
           const slides = await parsePptxSlides(zip as import("jszip"));
           if (!cancelled) setPptxSlides(slides);
         }
@@ -260,6 +306,13 @@ export default function OfficePreview({ path, fileType }: Props) {
       cancelled = true;
     };
   }, [path, fileType]);
+
+  // Revoke any leftover PDF blob URL on unmount.
+  useEffect(() => {
+    return () => {
+      if (prevPdfUrlRef.current) URL.revokeObjectURL(prevPdfUrlRef.current);
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -282,8 +335,18 @@ export default function OfficePreview({ path, fileType }: Props) {
     );
   }
 
-  // ── DOCX ──
+  // ── DOCX / DOC ──
   if (ft === "docx" || ft === "doc") {
+    // Legacy .doc converted to PDF via LibreOffice — render natively.
+    if (pdfBlobUrl) {
+      return (
+        <iframe
+          src={pdfBlobUrl}
+          style={{ flex: 1, width: "100%", height: "100%", border: "none" }}
+          title="文档预览"
+        />
+      );
+    }
     if (!docHtml) return <Empty description="文档内容为空" style={{ marginTop: 40 }} />;
     return (
       <iframe
@@ -346,7 +409,17 @@ export default function OfficePreview({ path, fileType }: Props) {
 
   // ── PPTX / PPT ──
   if (ft === "pptx" || ft === "ppt") {
-    // Legacy .ppt path: docHtml carries text-only fallback.
+    // Legacy .ppt converted to PDF via LibreOffice — render natively.
+    if (pdfBlobUrl) {
+      return (
+        <iframe
+          src={pdfBlobUrl}
+          style={{ flex: 1, width: "100%", height: "100%", border: "none" }}
+          title="文档预览"
+        />
+      );
+    }
+    // Legacy .ppt fallback path with text-only docHtml.
     if (docHtml) {
       return (
         <iframe
