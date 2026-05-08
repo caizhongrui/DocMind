@@ -37,10 +37,19 @@ apiReleasesRouter.get("/updates/:platform/:current_version", (c) => {
   if (!row) return c.body(null, 204);
   if (!versionGt(row.version, current)) return c.body(null, 204);
 
+  // SQLite `datetime('now')` returns "YYYY-MM-DD HH:MM:SS" (UTC, space
+  // separator). Tauri's updater parses pub_date as RFC3339 via the `time`
+  // crate — it needs "T" between date+time and a "Z" timezone suffix.
+  // Without this fix the whole manifest fails to parse and the client
+  // silently sees no update.
+  const pubDate = row.published_at.includes("T")
+    ? row.published_at
+    : row.published_at.replace(" ", "T") + "Z";
+
   return c.json({
     version: row.version,
     notes: row.notes ?? "",
-    pub_date: row.published_at,
+    pub_date: pubDate,
     platforms: {
       [platform]: {
         signature: row.signature,
