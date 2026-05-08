@@ -52,41 +52,14 @@ jobs:
             src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
             src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
 
-  # ── macOS Intel ───────────────────────────────────────────────────────
-  build-macos-x64:
-    name: Build macOS x64 (Intel)
-    runs-on: macos-13              # GitHub's last x86_64 macOS runner
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-apple-darwin
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          key: macos-x64
-
-      - run: npm ci
-
-      - name: Build (x86_64-apple-darwin)
-        run: npm run tauri build -- --target x86_64-apple-darwin
-        env:
-          MACOSX_DEPLOYMENT_TARGET: "10.15"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-x64
-          path: |
-            src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
-            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+  # ── macOS Intel:暂不构建 ───────────────────────────────────────────
+  # GitHub 的 macos-13 runner 池排队动辄 10+ 小时,不再值得。如果以后
+  # 真有 Intel Mac 用户,有两个选项:
+  #   (1) 自托管一台 Intel Mac runner
+  #   (2) 改回 universal binary (单 .app 同时包含 arm64 + x86_64),
+  #       在 macos-latest (Apple Silicon) 上交叉编译,但 Tauri updater
+  #       平台键需要服务端把 darwin-x86_64 映射到 darwin-aarch64 的同
+  #       一份 manifest。
 
   # ── Windows x64 ───────────────────────────────────────────────────────
   build-windows-x64:
@@ -130,7 +103,7 @@ jobs:
   # ── Tag 推送时,把三个平台的产物挂到 GitHub Release ────────────────────
   release:
     name: Publish GitHub Release
-    needs: [build-macos-arm64, build-macos-x64, build-windows-x64]
+    needs: [build-macos-arm64, build-windows-x64]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -152,9 +125,6 @@ jobs:
             artifacts/macos-arm64/dmg/*.dmg
             artifacts/macos-arm64/macos/*.app.tar.gz
             artifacts/macos-arm64/macos/*.app.tar.gz.sig
-            artifacts/macos-x64/dmg/*.dmg
-            artifacts/macos-x64/macos/*.app.tar.gz
-            artifacts/macos-x64/macos/*.app.tar.gz.sig
             artifacts/windows-x64/nsis/*.exe
             artifacts/windows-x64/nsis/*.exe.sig
             artifacts/windows-x64/msi/*.msi
@@ -217,10 +187,7 @@ jobs:
             "$(ls artifacts/macos-arm64/macos/*.app.tar.gz 2>/dev/null | head -1)" \
             "$(ls artifacts/macos-arm64/macos/*.app.tar.gz.sig 2>/dev/null | head -1)"
 
-          # macOS x64
-          publish "darwin-x86_64" \
-            "$(ls artifacts/macos-x64/macos/*.app.tar.gz 2>/dev/null | head -1)" \
-            "$(ls artifacts/macos-x64/macos/*.app.tar.gz.sig 2>/dev/null | head -1)"
+          # macOS x64 (Intel) — currently disabled, see workflow header.
 
           # Windows x64 — Tauri's NSIS updater bundle is the .exe itself
           # (signed by the .exe.sig file alongside it).
