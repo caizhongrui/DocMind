@@ -37,17 +37,23 @@ export default function UpgradeDialog() {
   const status = useLicenseStore((s) => s.status);
 
   const [activationOpen, setActivationOpen] = useState(false);
+  const [activationMode, setActivationMode] = useState<"online" | "offline">("online");
   const [keyInput, setKeyInput] = useState("");
+  const [tokenInput, setTokenInput] = useState("");
   const [activating, setActivating] = useState(false);
   const [activationError, setActivationError] = useState<string | null>(null);
+  const [fingerprintCopied, setFingerprintCopied] = useState(false);
 
   const visible = upgradeRequest !== null;
 
   useEffect(() => {
     if (!visible) {
       setActivationOpen(false);
+      setActivationMode("online");
       setKeyInput("");
+      setTokenInput("");
       setActivationError(null);
+      setFingerprintCopied(false);
     }
   }, [visible]);
 
@@ -86,6 +92,38 @@ export default function UpgradeDialog() {
       setActivationError(e instanceof Error ? e.message : String(e));
     } finally {
       setActivating(false);
+    }
+  };
+
+  const handleOfflineActivate = async () => {
+    setActivationError(null);
+    setActivating(true);
+    try {
+      const trimmed = tokenInput.trim();
+      if (!trimmed) throw new Error("请粘贴管理员发给你的 token JSON");
+      // sanity check: should parse as JSON
+      try {
+        JSON.parse(trimmed);
+      } catch {
+        throw new Error("不是合法的 JSON,请检查复制是否完整");
+      }
+      await invoke("install_license_token", { input: { tokenJson: trimmed } });
+      closeUpgrade();
+    } catch (e) {
+      setActivationError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActivating(false);
+    }
+  };
+
+  const copyFingerprint = async () => {
+    if (!status?.fingerprint) return;
+    try {
+      await navigator.clipboard.writeText(status.fingerprint);
+      setFingerprintCopied(true);
+      setTimeout(() => setFingerprintCopied(false), 2000);
+    } catch {
+      // ignore
     }
   };
 
@@ -173,7 +211,7 @@ export default function UpgradeDialog() {
         {!activationOpen ? (
           <Space style={{ width: "100%", justifyContent: "space-between" }}>
             <Button type="link" size="small" onClick={() => setActivationOpen(true)}>
-              已购买，输入 license key 激活
+              已购买，激活
             </Button>
             <Button
               type="primary"
@@ -187,34 +225,141 @@ export default function UpgradeDialog() {
         ) : (
           <div>
             <Divider style={{ margin: "8px 0 12px" }} />
-            <div className="section-label" style={{ marginBottom: 8 }}>
-              输入激活码
+
+            {/* Mode tabs */}
+            <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setActivationMode("online");
+                  setActivationError(null);
+                }}
+                style={{
+                  flex: 1,
+                  padding: "6px 12px",
+                  fontSize: 12,
+                  fontWeight: activationMode === "online" ? 600 : 500,
+                  color: activationMode === "online" ? "var(--color-primary)" : "var(--color-text-secondary)",
+                  background: activationMode === "online" ? "var(--color-primary-bg)" : "transparent",
+                  border: `1px solid ${activationMode === "online" ? "var(--color-primary)" : "var(--color-border)"}`,
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+              >
+                在线激活
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActivationMode("offline");
+                  setActivationError(null);
+                }}
+                style={{
+                  flex: 1,
+                  padding: "6px 12px",
+                  fontSize: 12,
+                  fontWeight: activationMode === "offline" ? 600 : 500,
+                  color: activationMode === "offline" ? "var(--color-primary)" : "var(--color-text-secondary)",
+                  background: activationMode === "offline" ? "var(--color-primary-bg)" : "transparent",
+                  border: `1px solid ${activationMode === "offline" ? "var(--color-primary)" : "var(--color-border)"}`,
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+              >
+                离线激活
+              </button>
             </div>
-            <input
-              value={keyInput}
-              onChange={(e) => setKeyInput(e.target.value)}
-              placeholder="DM-XXXX-XXXX-XXXX-XXXX-XXXX"
-              spellCheck={false}
-              autoFocus
-              className="mono"
-              style={{
-                width: "100%",
-                height: 36,
-                padding: "0 12px",
-                fontSize: 13,
-                background: "var(--color-surface-elevated)",
-                border: "1px solid var(--color-border)",
-                borderRadius: 6,
-                color: "var(--color-text)",
-                outline: "none",
-              }}
-            />
-            <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 6 }}>
-              当前设备指纹:
-              <span className="mono" style={{ marginLeft: 4 }}>
-                {status?.fingerprint?.slice(0, 16) ?? "...."}…
-              </span>
-            </div>
+
+            {activationMode === "online" ? (
+              <>
+                <div className="section-label" style={{ marginBottom: 8 }}>
+                  输入激活码
+                </div>
+                <input
+                  value={keyInput}
+                  onChange={(e) => setKeyInput(e.target.value)}
+                  placeholder="DM-XXXX-XXXX-XXXX-XXXX-XXXX"
+                  spellCheck={false}
+                  autoFocus
+                  className="mono"
+                  style={{
+                    width: "100%",
+                    height: 36,
+                    padding: "0 12px",
+                    fontSize: 13,
+                    background: "var(--color-surface-elevated)",
+                    border: "1px solid var(--color-border)",
+                    borderRadius: 6,
+                    color: "var(--color-text)",
+                    outline: "none",
+                  }}
+                />
+                <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 6 }}>
+                  当前设备指纹:
+                  <span className="mono" style={{ marginLeft: 4 }}>
+                    {status?.fingerprint?.slice(0, 16) ?? "...."}…
+                  </span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="section-label" style={{ marginBottom: 8 }}>
+                  Step 1 — 把这串硬件指纹发给客服
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 6,
+                    alignItems: "center",
+                    background: "var(--color-surface-elevated)",
+                    border: "1px solid var(--color-border)",
+                    borderRadius: 6,
+                    padding: "8px 12px",
+                    marginBottom: 12,
+                  }}
+                >
+                  <code
+                    className="mono"
+                    style={{
+                      flex: 1,
+                      fontSize: 12,
+                      color: "var(--color-text)",
+                      wordBreak: "break-all",
+                    }}
+                  >
+                    {status?.fingerprint ?? "..."}
+                  </code>
+                  <Button size="small" onClick={copyFingerprint}>
+                    {fingerprintCopied ? "已复制" : "复制"}
+                  </Button>
+                </div>
+
+                <div className="section-label" style={{ marginBottom: 8 }}>
+                  Step 2 — 粘贴客服返回的 token JSON
+                </div>
+                <textarea
+                  value={tokenInput}
+                  onChange={(e) => setTokenInput(e.target.value)}
+                  placeholder='{"v":1,"key":"DM-...","plan":"lifetime","fingerprint":"...","issued_at":"...","sig":"..."}'
+                  spellCheck={false}
+                  className="mono"
+                  rows={6}
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    fontSize: 11,
+                    background: "var(--color-surface-elevated)",
+                    border: "1px solid var(--color-border)",
+                    borderRadius: 6,
+                    color: "var(--color-text)",
+                    outline: "none",
+                    fontFamily: "var(--font-mono)",
+                    resize: "vertical",
+                  }}
+                />
+              </>
+            )}
+
             {activationError && (
               <div
                 style={{
@@ -234,15 +379,27 @@ export default function UpgradeDialog() {
               <Button size="small" onClick={() => setActivationOpen(false)}>
                 返回
               </Button>
-              <Button
-                type="primary"
-                size="small"
-                loading={activating}
-                disabled={keyInput.trim().length < 10}
-                onClick={handleActivate}
-              >
-                激活
-              </Button>
+              {activationMode === "online" ? (
+                <Button
+                  type="primary"
+                  size="small"
+                  loading={activating}
+                  disabled={keyInput.trim().length < 10}
+                  onClick={handleActivate}
+                >
+                  激活
+                </Button>
+              ) : (
+                <Button
+                  type="primary"
+                  size="small"
+                  loading={activating}
+                  disabled={tokenInput.trim().length < 50}
+                  onClick={handleOfflineActivate}
+                >
+                  离线激活
+                </Button>
+              )}
             </Space>
           </div>
         )}

@@ -264,9 +264,140 @@ adminRouter.post("/licenses/issue", async (c) => {
   <div style="margin-top: 16px;">
     <a class="btn" href="/admin/licenses/${encodeURIComponent(key)}">查看详情</a>
     <a class="btn" href="/admin/licenses/issue">再签一个</a>
+    <a class="btn" href="/admin/licenses/offline?key=${encodeURIComponent(key)}">离线激活(签 token)</a>
   </div>
 </div>`;
   return c.html(layout("已签发", body));
+});
+
+// ── 离线激活:管理员替没网络的客户签发 license token ───────────────────────
+//
+// 客户端用户在自己电脑上看到指纹(顶栏 license chip → 升级框 → 复制指纹),
+// 把指纹通过微信/邮件发给管理员,管理员在这里:
+//   1. 选择(或填入)一个 license key
+//   2. 粘贴客户端的指纹
+//   3. 服务器把 fingerprint 写入 licenses.bound_fingerprint(同步绑定),
+//      然后签 Ed25519 token JSON 返回。
+//   4. 管理员把这串 token JSON 发给客户,客户在客户端"离线激活"模式下
+//      粘贴即可,不需要联网。
+adminRouter.get("/licenses/offline", (c) => {
+  const guard = requireSession(c);
+  if (guard !== true) return guard;
+  const { db } = c.var.app;
+  const presetKey = c.req.query("key") ?? "";
+
+  // 列出未绑定的 license,管理员可以从下拉里选
+  const unbound = db
+    .prepare(
+      `SELECT key, COALESCE(buyer_email, '') AS buyer_email, COALESCE(note, '') AS note
+         FROM licenses WHERE bound_fingerprint IS NULL
+         ORDER BY created_at DESC LIMIT 100`,
+    )
+    .all() as Array<{ key: string; buyer_email: string; note: string }>;
+  const opts = unbound
+    .map((l) => {
+      const sel = l.key === presetKey ? " selected" : "";
+      const tag = l.buyer_email ? ` (${l.buyer_email})` : l.note ? ` (${l.note})` : "";
+      return `<option value="${htmlEscape(l.key)}"${sel}>${htmlEscape(l.key)}${htmlEscape(tag)}</option>`;
+    })
+    .join("");
+
+  const body = `
+<h1>离线激活(替客户签发 token)</h1>
+<div class="card">
+  <p style="font-size: 13px; line-height: 1.7; color: var(--text-secondary); margin: 0 0 14px;">
+    用法:客户在自己电脑上的客户端打开 license 升级框 → 复制指纹 → 把指纹+key 发给你 →
+    在这里填表 → 把签出来的 token JSON 返回给客户 → 客户粘贴到客户端"离线激活"模式即可。
+  </p>
+  <form method="POST" action="/admin/licenses/offline">
+    <label style="display:block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono); margin-bottom: 4px;">License Key(从未绑定的库存中选,或手动输入)</label>
+    ${opts ? `<select name="key" style="width: 100%; max-width: 460px; margin-bottom: 8px;">${opts}</select><br>` : ""}
+    <input name="key_manual" placeholder="或手动输入一个 DM-XXXX-XXXX-XXXX-XXXX-XXXX(留空则用上方下拉选的)" class="mono" style="width: 100%; max-width: 460px; margin-bottom: 12px;" value="${htmlEscape(presetKey && !unbound.some((l) => l.key === presetKey) ? presetKey : "")}">
+
+    <label style="display:block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono); margin-bottom: 4px;">客户端硬件指纹(32 位 hex,从客户那拿)</label>
+    <input name="fingerprint" required class="mono" placeholder="例如 71f39bea191cee7fff2c4d3f757aec98" style="width: 100%; max-width: 460px; margin-bottom: 12px;">
+
+    <label style="display:block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono); margin-bottom: 4px;">机器标签(可选,便于识别)</label>
+    <input name="machine_label" placeholder="例如:张三的 MacBook Pro" style="width: 100%; max-width: 460px; margin-bottom: 16px;">
+
+    <button class="primary" type="submit">签发 License Token</button>
+    <a class="btn" href="/admin/licenses" style="margin-left: 8px;">取消</a>
+  </form>
+</div>`;
+  return c.html(layout("离线激活", body));
+});
+
+adminRouter.post("/licenses/offline", async (c) => {
+  const guard = requireSession(c);
+  if (guard !== true) return guard;
+  const { db, signingKey } = c.var.app;
+  const form = await c.req.formData();
+  const keyFromSelect = String(form.get("key") ?? "").trim().toUpperCase();
+  const keyManual = String(form.get("key_manual") ?? "").trim().toUpperCase();
+  const fingerprint = String(form.get("fingerprint") ?? "").trim().toLowerCase();
+  const machineLabel = String(form.get("machine_label") ?? "");
+  const key = keyManual || keyFromSelect;
+
+  if (!key) return c.text("missing key", 400);
+  if (fingerprint.length < 16) return c.text("fingerprint too short", 400);
+
+  type Row = { plan: string; bound_fingerprint: string | null; revoked: number };
+  const row = db
+    .prepare(
+      `SELECT plan, bound_fingerprint,
+              CASE WHEN COALESCE(note, '') LIKE 'REVOKED%' THEN 1 ELSE 0 END AS revoked
+         FROM licenses WHERE key = ?`,
+    )
+    .get(key) as Row | undefined;
+  if (!row) return c.text("LICENSE_NOT_FOUND", 404);
+  if (row.revoked) return c.text("LICENSE_REVOKED", 410);
+
+  if (row.bound_fingerprint && row.bound_fingerprint.toLowerCase() !== fingerprint) {
+    return c.text(
+      `DEVICE_BOUND — 该 license 已绑定到指纹 ${row.bound_fingerprint},不能换机激活。`,
+      409,
+    );
+  }
+  if (!row.bound_fingerprint) {
+    db.prepare(
+      `UPDATE licenses
+          SET bound_fingerprint = ?, bound_at = datetime('now'), machine_label = ?
+        WHERE key = ?`,
+    ).run(fingerprint, machineLabel, key);
+  }
+
+  const issuedAt = new Date();
+  const plan = row.plan === "trial" ? "trial" : "lifetime";
+  const expiresAt =
+    plan === "trial" ? new Date(issuedAt.getTime() + 5 * 86400 * 1000) : null;
+  const { signToken } = await import("../license/sign.js");
+  const tokenJson = await signToken(signingKey.privateKey, {
+    key,
+    plan,
+    fingerprint,
+    issuedAt,
+    expiresAt,
+  });
+
+  const body = `
+<h1>已签发离线 Token</h1>
+<div class="card">
+  <div class="alert alert-success">License 已绑定到指纹 ${htmlEscape(fingerprint)},token 见下方。</div>
+  <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); margin: 16px 0 6px;">
+    Token JSON(整段复制发给客户)
+  </div>
+  <textarea id="tok" readonly style="width: 100%; min-height: 200px; font-family: var(--font-mono); font-size: 11px;">${htmlEscape(tokenJson)}</textarea>
+  <div style="display:flex; gap: 8px; margin-top: 10px;">
+    <button class="primary" onclick="navigator.clipboard.writeText(document.getElementById('tok').value).then(() => alert('已复制'))">复制 Token</button>
+    <a class="btn" href="/admin/licenses/${encodeURIComponent(key)}">查看 license 详情</a>
+    <a class="btn" href="/admin/licenses/offline">再签一个</a>
+  </div>
+  <p style="margin-top: 14px; font-size: 12px; color: var(--text-secondary); line-height: 1.7;">
+    告诉客户:打开 DocMind → 点顶栏 license chip → 升级框 → "离线激活(粘贴 token)" → 把上面这段整个粘贴进去 → 激活。
+    无需联网。
+  </p>
+</div>`;
+  return c.html(layout("已签发离线 Token", body));
 });
 
 adminRouter.get("/licenses/:key", (c) => {
