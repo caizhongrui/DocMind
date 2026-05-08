@@ -12,10 +12,8 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use super::fingerprint;
-use super::storage::{self, TrialMarker};
+use super::storage;
 use super::token::{LicenseToken, TokenPlan};
-
-pub const TRIAL_DAYS: i64 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -49,23 +47,24 @@ impl LicenseState {
         }
     }
 
-    pub fn trial(fp: String, marker: &TrialMarker) -> Self {
-        Self {
-            plan: Plan::Trial,
-            reason: "trial_active",
-            fingerprint: fp,
-            expires_at: Some(marker.expires_at(TRIAL_DAYS)),
-            license_key: None,
-        }
-    }
-
-    pub fn pro(fp: String, token: &LicenseToken) -> Self {
-        Self {
-            plan: Plan::Pro,
-            reason: "license_active",
-            fingerprint: fp,
-            expires_at: token.expires_at,
-            license_key: Some(token.key.clone()),
+    /// Build the runtime state from a verified license token.
+    /// Lifetime tokens become `Plan::Pro`; trial tokens become `Plan::Trial`.
+    pub fn from_token(fp: String, token: &LicenseToken) -> Self {
+        match token.plan {
+            TokenPlan::Lifetime => Self {
+                plan: Plan::Pro,
+                reason: "license_active",
+                fingerprint: fp,
+                expires_at: token.expires_at,
+                license_key: Some(token.key.clone()),
+            },
+            TokenPlan::Trial => Self {
+                plan: Plan::Trial,
+                reason: "trial_active",
+                fingerprint: fp,
+                expires_at: token.expires_at,
+                license_key: None,
+            },
         }
     }
 
@@ -79,31 +78,31 @@ pub type SharedLicense = Arc<RwLock<LicenseState>>;
 /// Decide the current state from on-disk artifacts.
 ///
 /// Order of precedence:
-/// 1. A signature-verified [`LicenseToken`] whose fingerprint matches the
-///    machine and which has not expired → `Plan::Pro`.
-/// 2. A trial marker whose fingerprint matches and whose 5-day window is
-///    still open → `Plan::Trial`.
-/// 3. A trial marker that has expired → `Plan::Free` ("trial_expired").
-/// 4. No marker at all → `Plan::Free` ("no_trial_yet"). The trial is
-///    **opt-in**: the user must click "开始试用" to flip into Trial.
+/// 1. A signature-verified [`LicenseToken`] (Lifetime OR Trial) whose
+///    fingerprint matches and which has not expired → `Plan::Pro` /
+///    `Plan::Trial`.
+/// 2. A signature-verified Trial token that has *expired* →
+///    `Plan::Free` ("trial_expired"). We keep the file around so we can
+///    distinguish "trial used + over" from "trial never started".
+/// 3. No token (or signature failed) → `Plan::Free` ("no_trial_yet").
+///
+/// Trial eligibility is enforced by the **server** at /license/start_trial;
+/// deleting `license.json` doesn't grant the user a fresh trial because
+/// the server still has the fingerprint on record.
 pub fn bootstrap(app_data_dir: &Path) -> LicenseState {
     let fp = fingerprint::current();
 
     if let Some(token) = storage::load_and_verify(app_data_dir) {
-        if token.fingerprint_matches(&fp) && !token.is_expired() {
-            return match token.plan {
-                TokenPlan::Lifetime | TokenPlan::Trial => LicenseState::pro(fp, &token),
-            };
+        if token.fingerprint_matches(&fp) {
+            if !token.is_expired() {
+                return LicenseState::from_token(fp, &token);
+            }
+            if matches!(token.plan, TokenPlan::Trial) {
+                return LicenseState::free(fp, "trial_expired");
+            }
         }
     }
-
-    match storage::read_trial(app_data_dir) {
-        Some(marker) if marker.fingerprint == fp && marker.is_active(TRIAL_DAYS) => {
-            LicenseState::trial(fp, &marker)
-        }
-        Some(_) => LicenseState::free(fp, "trial_expired"),
-        None => LicenseState::free(fp, "no_trial_yet"),
-    }
+    LicenseState::free(fp, "no_trial_yet")
 }
 
 pub fn shared(state: LicenseState) -> SharedLicense {

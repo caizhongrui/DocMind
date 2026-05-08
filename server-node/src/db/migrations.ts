@@ -95,6 +95,17 @@ export function applyMigrations(db: Database) {
     CREATE INDEX IF NOT EXISTS idx_refunds_trade ON refunds(out_trade_no);
     CREATE INDEX IF NOT EXISTS idx_refunds_status ON refunds(status);
 
+    -- 试用记录(以指纹为主键,服务端是试用资格的唯一权威来源 —
+    -- 客户端删除本地 license.json 不会重置试用次数)
+    CREATE TABLE IF NOT EXISTS trials (
+      fingerprint    TEXT PRIMARY KEY,
+      started_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at     TEXT NOT NULL,
+      machine_label  TEXT,
+      ip             TEXT,
+      user_agent     TEXT
+    );
+
     -- 门户站访问日志(每次 doc-web 请求一条)
     CREATE TABLE IF NOT EXISTS portal_access (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,

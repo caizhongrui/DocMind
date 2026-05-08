@@ -211,12 +211,27 @@ export default function UpgradeDialog() {
     setTrialError(null);
     setStartingTrial(true);
     try {
-      await invoke("start_trial");
+      const fingerprint = await invoke<string>("get_hardware_fingerprint");
+      const r = await fetch(`${API_BASE}/api/v1/license/start_trial`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fingerprint }),
+      });
+      if (!r.ok) {
+        const text = (await r.text()).trim();
+        if (text === "TRIAL_ALREADY_USED") {
+          throw new Error("该设备已使用过试用,无法再次启用。");
+        }
+        throw new Error(`服务器返回 ${r.status}: ${text}`);
+      }
+      const d = (await r.json()) as { token_json: string };
+      // The server-signed trial token is verified locally and written to
+      // license.json — same code path as a paid Pro license.
+      await invoke("install_license_token", { input: { token_json: d.token_json } });
       await refreshLicense();
       closeUpgrade();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setTrialError(msg === "TRIAL_ALREADY_USED" ? "试用已使用过,无法再次启用" : msg);
+      setTrialError(e instanceof Error ? e.message : String(e));
     } finally {
       setStartingTrial(false);
     }

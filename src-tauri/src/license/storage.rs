@@ -3,12 +3,12 @@
 //! Stored as a JSON file inside the app data directory:
 //!   `{app_data}/license.json`
 //!
-//! Trial tokens are also generated and persisted here on first launch (see
-//! [`ensure_trial_token`]).
+//! Trial tokens live in the same file — they're just signed Ed25519
+//! tokens with `plan="trial"` and a 5-day `expires_at`. The server is
+//! the source of truth for trial eligibility (see
+//! `POST /api/v1/license/start_trial` in the server).
 
 use std::path::{Path, PathBuf};
-
-use chrono::{Duration, Utc};
 
 use super::token::LicenseToken;
 
@@ -40,58 +40,7 @@ pub fn load_and_verify(app_data_dir: &Path) -> Option<LicenseToken> {
     LicenseToken::parse_and_verify(&raw).ok()
 }
 
-/// Persist a marker that records the start of the locally-tracked trial.
-///
-/// The trial token is **not** signature-verified — there is no server signature
-/// for free trials. We simply persist a small JSON blob with the start time
-/// and treat its presence as authoritative. This is intentional: the trial is
-/// a local-only mechanism with low value to attack (5 days).
-pub const TRIAL_FILE: &str = "trial.json";
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TrialMarker {
-    pub started_at: chrono::DateTime<chrono::Utc>,
-    pub fingerprint: String,
-}
-
-impl TrialMarker {
-    pub fn expires_at(&self, days: i64) -> chrono::DateTime<chrono::Utc> {
-        self.started_at + Duration::days(days)
-    }
-    pub fn is_active(&self, days: i64) -> bool {
-        Utc::now() < self.expires_at(days)
-    }
-}
-
-pub fn trial_path(app_data_dir: &Path) -> PathBuf {
-    app_data_dir.join(TRIAL_FILE)
-}
-
-pub fn read_trial(app_data_dir: &Path) -> Option<TrialMarker> {
-    let raw = std::fs::read_to_string(trial_path(app_data_dir)).ok()?;
-    serde_json::from_str(&raw).ok()
-}
-
-pub fn write_trial(app_data_dir: &Path, marker: &TrialMarker) -> std::io::Result<()> {
-    std::fs::create_dir_all(app_data_dir)?;
-    let json = serde_json::to_string_pretty(marker).unwrap_or_default();
-    std::fs::write(trial_path(app_data_dir), json)
-}
-
-/// Start a fresh 5-day trial bound to this fingerprint.
-///
-/// Returns `None` if a marker already exists for this fingerprint — we
-/// don't allow restarting (the trial is a one-time freebie).
-pub fn start_trial(app_data_dir: &Path, fingerprint: &str) -> Option<TrialMarker> {
-    if let Some(existing) = read_trial(app_data_dir) {
-        if existing.fingerprint == fingerprint {
-            return None; // already used
-        }
-    }
-    let marker = TrialMarker {
-        started_at: Utc::now(),
-        fingerprint: fingerprint.to_string(),
-    };
-    let _ = write_trial(app_data_dir, &marker);
-    Some(marker)
-}
+// Legacy `trial.json` (used in older builds for the local-only trial)
+// is no longer read or written. If it exists from a previous install the
+// app simply ignores it; the user must click "开始试用" once to fetch a
+// proper signed trial token from the server.
