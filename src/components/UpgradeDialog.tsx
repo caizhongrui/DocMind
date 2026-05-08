@@ -4,7 +4,10 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useLicenseStore } from "../stores/licenseStore";
 
-const PORTAL_PRICING_URL = "https://doc-web.boyobang.com/pricing";
+// Open the API server's /checkout page (renders the WeChat Pay QR).
+// The marketing portal at doc-web.boyobang.com is info-only and has no
+// purchase UI — purchases always happen on doc-api.boyobang.com.
+const CHECKOUT_URL = "https://doc-api.boyobang.com/api/v1/payment/checkout?plan=lifetime";
 
 const REASON_TITLE: Record<string, string> = {
   custom_gguf: "导入自定义模型 — Pro 功能",
@@ -65,8 +68,8 @@ export default function UpgradeDialog() {
     upgradeRequest?.message ?? REASON_DESC[reason] ?? "升级到 Pro 解锁此功能。";
 
   const handleBuy = () => {
-    invoke("plugin:opener|open_url", { url: PORTAL_PRICING_URL }).catch(() => {
-      window.open(PORTAL_PRICING_URL, "_blank");
+    invoke("plugin:opener|open_url", { url: CHECKOUT_URL }).catch(() => {
+      window.open(CHECKOUT_URL, "_blank");
     });
   };
 
