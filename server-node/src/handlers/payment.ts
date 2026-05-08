@@ -33,66 +33,169 @@ import {
 
 export const paymentRouter = new Hono<AppEnv>();
 
-// ── /api/v1/payment/checkout ───────────────────────────────────────────────
-paymentRouter.get("/checkout", async (c) => {
-  const { config, db } = c.var.app;
-  const plan = c.req.query("plan") ?? "lifetime";
-  const email = c.req.query("email") ?? "";
-  // Optional hardware fingerprint passed from the client. When present the
-  // license issued by the webhook is auto-bound to it, so the success page
-  // can hand back a ready-to-paste signed token.
-  const fpRaw = (c.req.query("fp") ?? "").trim().toLowerCase();
-  const fp = /^[0-9a-f]{16,128}$/.test(fpRaw) ? fpRaw : null;
-  if (plan !== "lifetime") return c.text("unknown plan", 400);
+const ORDER_DESC = "DocMind Pro 终身授权";
 
-  const w = config.wechat;
+/**
+ * Shared order-creation path used by both:
+ *   - GET  /checkout       (browser flow, returns rendered QR HTML)
+ *   - POST /prepare        (Tauri client flow, returns JSON with QR svg)
+ *
+ * On success: row inserted into `orders`, prepay called against WeChat,
+ * `code_url` (the data behind the QR) returned along with the order IDs.
+ * On config error: returns a sentinel object the caller maps to the right
+ * response format for its surface.
+ */
+async function createOrder(opts: {
+  config: any;
+  db: any;
+  fp: string | null;
+  email: string;
+}): Promise<
+  | { ok: true; outTradeNo: string; claimTicket: string; codeUrl: string; amountFen: number }
+  | { ok: false; status: number; message: string }
+> {
+  const w = opts.config.wechat;
   if (!w.mchId || !w.appId || !w.apiV3Key || !w.privateKey || !w.certSerialNo) {
-    return c.html(
-      standalone(
-        "支付未配置",
-        `<div class="login-box" style="text-align:center;">
-  <h1>支付未配置</h1>
-  <p style="color: var(--text-muted); font-size: 13px; line-height: 1.7; margin: 14px 0;">
-    服务器尚未配置微信支付凭据(WECHAT_MCH_ID / WECHAT_APP_ID /
-    WECHAT_API_V3_KEY / WECHAT_MCH_CERT_SERIAL_NO / 商户私钥 / 平台证书)。
-    请联系管理员。
-  </p>
-</div>`,
-      ),
-      500,
-    );
+    return { ok: false, status: 503, message: "payment not configured" };
   }
-
   const outTradeNo = `DM-${Date.now()}`;
   const claimTicket = randomTicket();
-  const amount = config.priceLifetimeFen;
-  const desc = "DocMind Pro 终身授权";
+  const amount = opts.config.priceLifetimeFen;
 
-  db.prepare(
-    `INSERT INTO orders (out_trade_no, amount, claim_ticket, bound_fingerprint, raw_payload)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(outTradeNo, amount, claimTicket, fp, email);
+  opts.db
+    .prepare(
+      `INSERT INTO orders (out_trade_no, amount, claim_ticket, bound_fingerprint, raw_payload)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(outTradeNo, amount, claimTicket, opts.fp, opts.email);
 
   const wp = new WechatPay(w);
   let codeUrl: string;
   try {
     codeUrl = await wp.createNativePrepay({
       outTradeNo,
-      description: desc,
+      description: ORDER_DESC,
       amountFen: amount,
     });
   } catch (e) {
     console.error("[wechat] prepay failed:", e);
-    return c.text(`微信预下单失败: ${(e as Error).message}`, 502);
+    return { ok: false, status: 502, message: `prepay failed: ${(e as Error).message}` };
+  }
+  return { ok: true, outTradeNo, claimTicket, codeUrl, amountFen: amount };
+}
+
+// ── GET /api/v1/payment/checkout (browser flow) ────────────────────────────
+paymentRouter.get("/checkout", async (c) => {
+  const { config, db } = c.var.app;
+  const plan = c.req.query("plan") ?? "lifetime";
+  const email = c.req.query("email") ?? "";
+  const fpRaw = (c.req.query("fp") ?? "").trim().toLowerCase();
+  const fp = /^[0-9a-f]{16,128}$/.test(fpRaw) ? fpRaw : null;
+  if (plan !== "lifetime") return c.text("unknown plan", 400);
+
+  const r = await createOrder({ config, db, fp, email });
+  if (!r.ok) {
+    if (r.status === 503) {
+      return c.html(
+        standalone(
+          "支付未配置",
+          `<div class="login-box" style="text-align:center;">
+  <h1>支付未配置</h1>
+  <p style="color: var(--text-muted); font-size: 13px; line-height: 1.7; margin: 14px 0;">
+    服务器尚未配置微信支付凭据。请联系管理员。
+  </p>
+</div>`,
+        ),
+        500,
+      );
+    }
+    return c.text(`微信预下单失败: ${r.message}`, r.status as any);
   }
 
-  const qrSvg = await QRCode.toString(codeUrl, {
+  const qrSvg = await QRCode.toString(r.codeUrl, {
     type: "svg",
     margin: 1,
     width: 220,
   });
+  return c.html(renderQrPage(r.outTradeNo, r.claimTicket, qrSvg, r.amountFen, ORDER_DESC));
+});
 
-  return c.html(renderQrPage(outTradeNo, claimTicket, qrSvg, amount, desc));
+// ── POST /api/v1/payment/prepare (Tauri client flow) ───────────────────────
+//
+// The desktop client calls this, then renders the QR inline in its upgrade
+// dialog and polls /order_status. Removes the browser hop entirely.
+paymentRouter.post("/prepare", async (c) => {
+  const { config, db } = c.var.app;
+  const body = await c.req.json().catch(() => ({}) as any);
+  const plan = String(body?.plan ?? "lifetime");
+  const email = String(body?.email ?? "");
+  const fpRaw = String(body?.fp ?? "").trim().toLowerCase();
+  const fp = /^[0-9a-f]{16,128}$/.test(fpRaw) ? fpRaw : null;
+  if (plan !== "lifetime") return c.json({ error: "unknown plan" }, 400);
+
+  const r = await createOrder({ config, db, fp, email });
+  if (!r.ok) return c.json({ error: r.message }, r.status as any);
+
+  const qrSvg = await QRCode.toString(r.codeUrl, {
+    type: "svg",
+    margin: 1,
+    width: 220,
+    color: { dark: "#16181d", light: "#ffffff" },
+  });
+
+  return c.json({
+    out_trade_no: r.outTradeNo,
+    claim_ticket: r.claimTicket,
+    code_url: r.codeUrl,
+    qr_svg: qrSvg,
+    amount_fen: r.amountFen,
+    description: ORDER_DESC,
+  });
+});
+
+// ── GET /api/v1/payment/issued_token?o=&t= ─────────────────────────────────
+//
+// After /order_status reports ready=true, the client calls this to fetch
+// the server-signed Ed25519 token JSON, which it then hands to the
+// install_license_token Tauri command. The (o, t) pair is the same access
+// gate as /payment/success.
+paymentRouter.get("/issued_token", async (c) => {
+  const { db, signingKey } = c.var.app;
+  const o = c.req.query("o") ?? "";
+  const t = c.req.query("t") ?? "";
+  if (!o || t.length < 32) return c.json({ error: "bad params" }, 403);
+
+  const row = db
+    .prepare(
+      `SELECT paid_at, license_key, bound_fingerprint
+         FROM orders WHERE out_trade_no = ? AND claim_ticket = ?`,
+    )
+    .get(o, t) as
+    | { paid_at: string | null; license_key: string | null; bound_fingerprint: string | null }
+    | undefined;
+  if (!row) return c.json({ error: "order not found" }, 404);
+  if (!row.paid_at || !row.license_key) {
+    return c.json({ error: "PENDING_PAYMENT" }, 409);
+  }
+  if (!row.bound_fingerprint) {
+    return c.json({ error: "ORDER_HAS_NO_FINGERPRINT" }, 409);
+  }
+
+  const { signToken } = await import("../license/sign.js");
+  const tokenJson = await signToken(signingKey.privateKey, {
+    key: row.license_key,
+    plan: "lifetime",
+    fingerprint: row.bound_fingerprint,
+    issuedAt: new Date(),
+    expiresAt: null,
+  });
+  // Mark the claim ticket as consumed so re-fetches still work but we know
+  // the user has been served. (Idempotent.)
+  db.prepare(
+    `UPDATE orders SET claim_consumed_at = COALESCE(claim_consumed_at, datetime('now'))
+      WHERE out_trade_no = ?`,
+  ).run(o);
+  return c.json({ token_json: tokenJson });
 });
 
 // ── /api/v1/payment/wechat/webhook ─────────────────────────────────────────

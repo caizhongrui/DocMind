@@ -4,11 +4,18 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useLicenseStore } from "../stores/licenseStore";
 
-// Base URL of the API server's /checkout page (renders the WeChat Pay QR).
-// We append the current device fingerprint so the webhook can auto-bind
-// the issued license — the success page then hands back a ready-to-paste
-// signed token JSON, skipping the round-trip back through /api/v1/license/activate.
-const CHECKOUT_BASE = "https://doc-api.boyobang.com/api/v1/payment/checkout?plan=lifetime";
+// API base for the WeChat Pay flow. The desktop client renders the QR
+// itself (no browser hop) and polls /order_status; once paid, it pulls the
+// signed token from /issued_token and installs it locally.
+const API_BASE = "https://doc-api.boyobang.com";
+
+type QrSession = {
+  out: string;
+  ticket: string;
+  qrSvg: string;
+  amountFen: number;
+};
+type PaymentPhase = "idle" | "preparing" | "waiting" | "issuing" | "done" | "error";
 
 const REASON_TITLE: Record<string, string> = {
   custom_gguf: "导入自定义模型 — Pro 功能",
@@ -48,6 +55,12 @@ export default function UpgradeDialog() {
   const [activationError, setActivationError] = useState<string | null>(null);
   const [fingerprintCopied, setFingerprintCopied] = useState(false);
 
+  // In-dialog WeChat Pay flow.
+  const [qrSession, setQrSession] = useState<QrSession | null>(null);
+  const [paymentPhase, setPaymentPhase] = useState<PaymentPhase>("idle");
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const refreshLicense = useLicenseStore((s) => s.refresh);
+
   const visible = upgradeRequest !== null;
 
   useEffect(() => {
@@ -58,8 +71,87 @@ export default function UpgradeDialog() {
       setTokenInput("");
       setActivationError(null);
       setFingerprintCopied(false);
+      setQrSession(null);
+      setPaymentPhase("idle");
+      setPaymentError(null);
     }
   }, [visible]);
+
+  // Poll order status while a QR session is live and payment is pending.
+  // Cleans up on dialog close or phase transition.
+  useEffect(() => {
+    if (!qrSession || paymentPhase !== "waiting") return;
+    let cancelled = false;
+    let attempts = 0;
+    const tick = async () => {
+      if (cancelled) return;
+      attempts++;
+      // 200 attempts × 3s = 10 minutes; matches WeChat's prepay TTL.
+      if (attempts > 200) {
+        setPaymentPhase("error");
+        setPaymentError("等待超时,请重新下单");
+        return;
+      }
+      try {
+        const url = `${API_BASE}/api/v1/payment/order_status?o=${encodeURIComponent(
+          qrSession.out,
+        )}&t=${encodeURIComponent(qrSession.ticket)}`;
+        const r = await fetch(url, { cache: "no-store" });
+        if (cancelled) return;
+        if (r.ok) {
+          const d = (await r.json()) as { ready: boolean };
+          if (d.ready) {
+            setPaymentPhase("issuing");
+            return;
+          }
+        }
+      } catch {
+        // network blip — try again next tick
+      }
+      if (!cancelled) setTimeout(tick, 3000);
+    };
+    const handle = setTimeout(tick, 3000);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [qrSession, paymentPhase]);
+
+  // Once the order is reported paid, fetch the signed token + install it.
+  useEffect(() => {
+    if (!qrSession || paymentPhase !== "issuing") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const url = `${API_BASE}/api/v1/payment/issued_token?o=${encodeURIComponent(
+          qrSession.out,
+        )}&t=${encodeURIComponent(qrSession.ticket)}`;
+        const r = await fetch(url, { cache: "no-store" });
+        if (cancelled) return;
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error(`服务器返回 ${r.status}: ${text}`);
+        }
+        const d = (await r.json()) as { token_json: string };
+        await invoke("install_license_token", { input: { token_json: d.token_json } });
+        if (cancelled) return;
+        await refreshLicense();
+        setPaymentPhase("done");
+        // Brief pause so the user sees the success state before the dialog
+        // disappears — feels less abrupt than an instant close.
+        setTimeout(() => {
+          if (!cancelled) closeUpgrade();
+        }, 1200);
+      } catch (e) {
+        if (cancelled) return;
+        setPaymentPhase("error");
+        setPaymentError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [qrSession, paymentPhase, closeUpgrade, refreshLicense]);
 
   if (!visible) return null;
 
@@ -69,16 +161,42 @@ export default function UpgradeDialog() {
     upgradeRequest?.message ?? REASON_DESC[reason] ?? "升级到 Pro 解锁此功能。";
 
   const handleBuy = async () => {
-    let url = CHECKOUT_BASE;
+    setPaymentError(null);
+    setPaymentPhase("preparing");
     try {
       const fp = await invoke<string>("get_hardware_fingerprint");
-      if (fp) url += `&fp=${encodeURIComponent(fp)}`;
-    } catch {
-      // fall through with no fp — the server will still accept the order
+      const r = await fetch(`${API_BASE}/api/v1/payment/prepare`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: "lifetime", fp }),
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(`服务器返回 ${r.status}: ${text}`);
+      }
+      const d = (await r.json()) as {
+        out_trade_no: string;
+        claim_ticket: string;
+        qr_svg: string;
+        amount_fen: number;
+      };
+      setQrSession({
+        out: d.out_trade_no,
+        ticket: d.claim_ticket,
+        qrSvg: d.qr_svg,
+        amountFen: d.amount_fen,
+      });
+      setPaymentPhase("waiting");
+    } catch (e) {
+      setPaymentPhase("error");
+      setPaymentError(e instanceof Error ? e.message : String(e));
     }
-    invoke("plugin:opener|open_url", { url }).catch(() => {
-      window.open(url, "_blank");
-    });
+  };
+
+  const cancelPayment = () => {
+    setQrSession(null);
+    setPaymentPhase("idle");
+    setPaymentError(null);
   };
 
   const handleActivate = async () => {
@@ -219,20 +337,138 @@ export default function UpgradeDialog() {
           </div>
         </div>
 
-        {!activationOpen ? (
-          <Space style={{ width: "100%", justifyContent: "space-between" }}>
-            <Button type="link" size="small" onClick={() => setActivationOpen(true)}>
-              已购买，激活
-            </Button>
-            <Button
-              type="primary"
-              icon={<ThunderboltOutlined />}
-              onClick={handleBuy}
-              style={{ borderRadius: 6 }}
-            >
-              立即购买
-            </Button>
-          </Space>
+        {qrSession ? (
+          <div>
+            <Divider style={{ margin: "8px 0 12px" }} />
+            <div className="section-label" style={{ marginBottom: 8 }}>
+              {paymentPhase === "done"
+                ? "✓ 支付成功，已自动激活"
+                : paymentPhase === "issuing"
+                  ? "✓ 已收到付款，正在签发 license…"
+                  : paymentPhase === "error"
+                    ? "× 出错"
+                    : "用微信扫一扫支付 ¥" +
+                      (qrSession.amountFen / 100).toFixed(2)}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                padding: 12,
+                background: "#fff",
+                borderRadius: 8,
+                marginBottom: 12,
+              }}
+              dangerouslySetInnerHTML={{ __html: qrSession.qrSvg }}
+            />
+            {paymentPhase === "waiting" && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  background: "var(--color-surface-elevated)",
+                  border: "1px solid var(--color-border)",
+                  fontSize: 12,
+                  color: "var(--color-text-secondary)",
+                }}
+              >
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: "#f59e0b",
+                  }}
+                />
+                等待支付…
+              </div>
+            )}
+            {paymentPhase === "issuing" && (
+              <div
+                style={{
+                  textAlign: "center",
+                  fontSize: 12,
+                  color: "var(--color-text-secondary)",
+                }}
+              >
+                正在签发 license token…
+              </div>
+            )}
+            {paymentPhase === "done" && (
+              <div
+                style={{
+                  textAlign: "center",
+                  fontSize: 12,
+                  color: "#22c55e",
+                  fontWeight: 500,
+                }}
+              >
+                欢迎使用 DocMind Pro 🎉
+              </div>
+            )}
+            {paymentPhase === "error" && paymentError && (
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  background: "rgba(239,68,68,0.08)",
+                  border: "1px solid rgba(239,68,68,0.25)",
+                  fontSize: 12,
+                  color: "#dc2626",
+                }}
+              >
+                {paymentError}
+              </div>
+            )}
+            <div className="mono" style={{ fontSize: 10, color: "var(--color-text-muted)", textAlign: "center", marginTop: 8 }}>
+              订单 {qrSession.out}
+            </div>
+            {paymentPhase !== "done" && paymentPhase !== "issuing" && (
+              <Space style={{ marginTop: 12, width: "100%", justifyContent: "flex-end" }}>
+                <Button size="small" onClick={cancelPayment}>
+                  取消
+                </Button>
+              </Space>
+            )}
+          </div>
+        ) : !activationOpen ? (
+          <>
+            {paymentPhase === "error" && paymentError && (
+              <div
+                style={{
+                  marginBottom: 8,
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  background: "rgba(239,68,68,0.08)",
+                  border: "1px solid rgba(239,68,68,0.25)",
+                  fontSize: 12,
+                  color: "#dc2626",
+                }}
+              >
+                {paymentError}
+              </div>
+            )}
+            <Space style={{ width: "100%", justifyContent: "space-between" }}>
+              <Button type="link" size="small" onClick={() => setActivationOpen(true)}>
+                已购买，激活
+              </Button>
+              <Button
+                type="primary"
+                icon={<ThunderboltOutlined />}
+                loading={paymentPhase === "preparing"}
+                onClick={handleBuy}
+                style={{ borderRadius: 6 }}
+              >
+                立即购买
+              </Button>
+            </Space>
+          </>
         ) : (
           <div>
             <Divider style={{ margin: "8px 0 12px" }} />
