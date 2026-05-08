@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://docmind.app/sitemap-index.xml
+Sitemap: https://docmind.app/sitemap.xml
