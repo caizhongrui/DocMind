@@ -21,6 +21,22 @@ const IMAGE_TYPES = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "tiff", 
 const OFFICE_TYPES = ["docx", "xlsx", "pptx", "doc", "xls", "ppt", "csv"];
 const NO_PREVIEW_TYPES: string[] = [];
 
+/**
+ * Strip Word field codes that leak into legacy .doc / .ppt extracted
+ * text (TOC, HYPERLINK \l _TocXXX, PAGEREF, ...). These come from the
+ * Rust byte-scanner indexer and would otherwise render in the snippet
+ * preview.
+ */
+function cleanFieldCodes(s: string): string {
+  return s
+    .replace(/TOC\s*\\o\s*"[^"]*"(?:\s*\\[a-z])*\s*/gi, "")
+    .replace(/HYPERLINK\s*\\l\s*_Toc\d+\s*/gi, "")
+    .replace(/PAGEREF\s*_Toc\d+\s*/gi, "")
+    .replace(/\s*\\[a-z](?=\s|$)/gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 function ZipContentView({ text, query }: { text: string; query: string }) {
   const parts = text.split(/(?:^|\n)(--- .+ ---)\n/);
   const sections: { filename?: string; content: string }[] = [];
@@ -278,7 +294,9 @@ export default function PreviewPanel() {
           <Typography.Text
             style={{ fontSize: 12, lineHeight: 1.7, display: "block", color: "var(--color-text)" }}
           >
-            {isSemantic ? selected.snippet : <HighlightText text={selected.snippet} query={query} />}
+            {isSemantic
+              ? cleanFieldCodes(selected.snippet)
+              : <HighlightText text={cleanFieldCodes(selected.snippet)} query={query} />}
           </Typography.Text>
         </div>
       )}

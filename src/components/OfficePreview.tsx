@@ -80,6 +80,31 @@ function buildPlainTextHtml(text: string, banner: string): string {
   </body></html>`;
 }
 
+/**
+ * macOS `textutil` produces a .docx where Word field codes
+ * ( `TOC \o "1-3" \h \z \u`, `HYPERLINK \l _TocXXX`, `PAGEREF _TocXXX` )
+ * are flattened into plain text runs instead of being evaluated. mammoth
+ * then renders them verbatim. Strip the obvious patterns so the body
+ * stays readable. (LibreOffice's converter doesn't have this problem.)
+ */
+function stripWordFieldCodes(html: string): string {
+  return html
+    // TOC instruction with all its switches: TOC \o "1-3" \h \z \u
+    .replace(/TOC\s*\\o\s*"[^"]*"(?:\s*\\[a-z])*\s*/gi, "")
+    // Hyperlink to a bookmark: HYPERLINK \l _Toc12345
+    .replace(/HYPERLINK\s*\\l\s*_Toc\d+\s*/gi, "")
+    // Page-number reference: PAGEREF _Toc12345
+    .replace(/PAGEREF\s*_Toc\d+\s*/gi, "")
+    // Trailing single-letter switches that escape the patterns above: \h \z \u
+    .replace(/\s*\\[a-z](?=\s|<|$)/gi, "")
+    // Common Word field wrappers that may also leak through
+    .replace(/\bSEQ\s+\w+(?:\s+\\\*\s*\w+)?\s*/gi, "")
+    .replace(/\bREF\s+_Ref\d+\s*/gi, "")
+    // Collapse the runs of whitespace the strips leave behind
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/<p>\s*<\/p>/g, "");
+}
+
 function buildDocxHtml(body: string): string {
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
     * { box-sizing: border-box; }
@@ -225,7 +250,7 @@ export default function OfficePreview({ path, fileType }: Props) {
                 // docx — feed to mammoth, same as native .docx.
                 const mammoth = (await import("mammoth")).default;
                 const result = await mammoth.convertToHtml({ arrayBuffer: buf });
-                if (!cancelled) setDocHtml(buildDocxHtml(result.value));
+                if (!cancelled) setDocHtml(buildDocxHtml(stripWordFieldCodes(result.value)));
               }
             } catch (err) {
               // No converter installed → text fallback + install hint.
