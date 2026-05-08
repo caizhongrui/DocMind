@@ -14,7 +14,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AppEnv } from "../app.js";
 import { generateKey } from "../license/sign.js";
-import { sha256Hex } from "../payjs.js";
+import { sha256Hex } from "../util.js";
 import { htmlEscape, layout, standalone } from "../templates.js";
 
 const SESSION_COOKIE = "docmind_admin_session";

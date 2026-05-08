@@ -1,40 +1,40 @@
-# DocMind self-hosted backend — Axum API container.
+# DocMind self-hosted backend
 #
 # 部署模式:宝塔面板统一处理 SSL + 静态门户。
-#   - 这个容器只跑 Rust API,绑定到宿主机 loopback 上的 8080 端口
-#   - 宝塔 Nginx 用 reverse_proxy 转发 doc-api.boyobang.com → 127.0.0.1:8080
-#   - 门户站独立部署在宝塔的另一个站点(静态文件)
+#   - 容器只跑 API + 静态门户,监听宿主机 loopback 8080
+#   - 宝塔 Nginx 反代 doc-api / doc-web 两个子域 → 127.0.0.1:8080
+#
+# 微信支付凭据:
+#   把商户 API 私钥(apiclient_key.pem)和微信支付平台证书(wechatpay_cert.pem)
+#   放到 ./data/wechat/ 下。容器读取的路径已经在 environment 里配好。
 #
 # Usage:
 #   1. cp .env.example .env && vi .env
-#   2. docker compose up -d --build
+#   2. mkdir -p data/wechat && 把两个 PEM 复制进去
+#   3. docker compose up -d
 
 services:
   docmind-server:
-    # 镜像 tag 由 scripts/build-and-push.sh 生成:
-    #   registry.boyocloud.com/boyo/docmind-server:YYYYMMDD-N
-    # IMAGE_TAG 优先用环境变量,默认拉 latest。
     image: ${IMAGE_TAG:-registry.cn-qingdao.aliyuncs.com/boyocloud/docmind-server:latest}
-    build:
-      context: .
-      dockerfile: Dockerfile
     container_name: docmind-server
     restart: unless-stopped
     ports:
-      # ⚠️ 仅绑定 127.0.0.1,只有宿主机的宝塔 Nginx 能访问。如果你需要从其他
-      # 机器直连(不通过宝塔),改成 "8080:8080"。
       - "127.0.0.1:8080:8080"
     volumes:
       - ./data:/data
     environment:
-      DATA_DIR: /data
-      LISTEN_ADDR: 0.0.0.0:8080
       DOMAIN: ${DOMAIN:-doc-api.boyobang.com}
       PORTAL_DOMAIN: ${PORTAL_DOMAIN:-doc-web.boyobang.com}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-      PAYJS_MERCHANT_ID: ${PAYJS_MERCHANT_ID}
-      PAYJS_KEY: ${PAYJS_KEY}
-      PAYJS_NOTIFY_URL: ${PAYJS_NOTIFY_URL:-https://doc-api.boyobang.com/api/v1/payment/payjs/webhook}
+
+      # 微信支付 — 6 项凭据,缺一不可
+      WECHAT_MCH_ID: ${WECHAT_MCH_ID}
+      WECHAT_APP_ID: ${WECHAT_APP_ID}
+      WECHAT_API_V3_KEY: ${WECHAT_API_V3_KEY}
+      WECHAT_MCH_CERT_SERIAL_NO: ${WECHAT_MCH_CERT_SERIAL_NO}
+      WECHAT_MCH_PRIVATE_KEY_PATH: /data/wechat/apiclient_key.pem
+      WECHAT_PLATFORM_CERT_PATH: /data/wechat/wechatpay_cert.pem
+      WECHAT_NOTIFY_URL: ${WECHAT_NOTIFY_URL:-https://doc-api.boyobang.com/api/v1/payment/wechat/webhook}
+
       PRICE_LIFETIME_FEN: ${PRICE_LIFETIME_FEN:-2000}
-      RUST_LOG: ${RUST_LOG:-info,docmind_server=debug}

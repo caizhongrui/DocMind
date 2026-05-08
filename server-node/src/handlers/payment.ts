@@ -1,25 +1,36 @@
 /**
- * PayJS payment integration + post-payment license delivery.
+ * 微信支付集成 + 支付完成后 license 交付。
  *
- * Routes:
+ * 路由:
  *   GET  /api/v1/payment/checkout?plan=lifetime
- *   POST /api/v1/payment/payjs/webhook
+ *        创建订单 + 调微信 Native 预下单 → 渲染二维码页 → 用户用微信
+ *        扫码支付 → 页面轮询直到 webhook 通过 → 自动跳 /payment/success
+ *
+ *   POST /api/v1/payment/wechat/webhook
+ *        微信回调,验签 + AES-GCM 解密 → 拿到 trade_state 与 out_trade_no
+ *        → 生成 license,与订单关联。**只有这条路径能写入 license_key。**
+ *
  *   GET  /api/v1/payment/order_status?o=&t=
- *   GET  /payment/success?o=&t=
+ *        前端轮询用,返回 { ready: bool }。
+ *
+ *   GET  /payment/success?o=&t=  (注册在公开路由)
+ *        校验 (o,t) 后展示 license key 或继续轮询页。
  */
 
 import { Hono } from "hono";
+import QRCode from "qrcode";
+
 import type { AppEnv } from "../app.js";
 import { generateKey } from "../license/sign.js";
-import { payjsSign, payjsVerify } from "../payjs.js";
 import { htmlEscape, standalone } from "../templates.js";
-import { randomBytes } from "node:crypto";
+import { randomTicket } from "../util.js";
+import {
+  WechatPay,
+  type WechatCallbackEnvelope,
+  type WechatTransactionEvent,
+} from "../wechatpay.js";
 
 export const paymentRouter = new Hono<AppEnv>();
-
-function randomTicket(): string {
-  return randomBytes(24).toString("hex");
-}
 
 // ── /api/v1/payment/checkout ───────────────────────────────────────────────
 paymentRouter.get("/checkout", async (c) => {
@@ -27,99 +38,149 @@ paymentRouter.get("/checkout", async (c) => {
   const plan = c.req.query("plan") ?? "lifetime";
   const email = c.req.query("email") ?? "";
   if (plan !== "lifetime") return c.text("unknown plan", 400);
-  if (!config.payjsMerchantId || !config.payjsKey) {
-    return c.text("PayJS not configured", 500);
+
+  const w = config.wechat;
+  if (!w.mchId || !w.appId || !w.apiV3Key || !w.privateKey || !w.certSerialNo) {
+    return c.html(
+      standalone(
+        "支付未配置",
+        `<div class="login-box" style="text-align:center;">
+  <h1>支付未配置</h1>
+  <p style="color: var(--text-muted); font-size: 13px; line-height: 1.7; margin: 14px 0;">
+    服务器尚未配置微信支付凭据(WECHAT_MCH_ID / WECHAT_APP_ID /
+    WECHAT_API_V3_KEY / WECHAT_MCH_CERT_SERIAL_NO / 商户私钥 / 平台证书)。
+    请联系管理员。
+  </p>
+</div>`,
+      ),
+      500,
+    );
   }
 
   const outTradeNo = `DM-${Date.now()}`;
   const claimTicket = randomTicket();
   const amount = config.priceLifetimeFen;
-  const body = "DocMind Pro 终身授权";
+  const desc = "DocMind Pro 终身授权";
 
   db.prepare(
     `INSERT INTO orders (out_trade_no, amount, claim_ticket, raw_payload)
      VALUES (?, ?, ?, ?)`,
   ).run(outTradeNo, amount, claimTicket, email);
 
-  const returnUrl = `https://${config.domain}/payment/success?o=${encodeURIComponent(outTradeNo)}&t=${encodeURIComponent(claimTicket)}`;
+  const wp = new WechatPay(w);
+  let codeUrl: string;
+  try {
+    codeUrl = await wp.createNativePrepay({
+      outTradeNo,
+      description: desc,
+      amountFen: amount,
+    });
+  } catch (e) {
+    console.error("[wechat] prepay failed:", e);
+    return c.text(`微信预下单失败: ${(e as Error).message}`, 502);
+  }
 
-  const params: Record<string, string> = {
-    mchid: config.payjsMerchantId,
-    total_fee: String(amount),
-    out_trade_no: outTradeNo,
-    body,
-    notify_url: config.payjsNotifyUrl,
-    return_url: returnUrl,
-  };
-  params.sign = payjsSign(params, config.payjsKey);
+  const qrSvg = await QRCode.toString(codeUrl, {
+    type: "svg",
+    margin: 1,
+    width: 220,
+  });
 
-  const qs = Object.keys(params)
-    .sort()
-    .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(params[k]!)}`)
-    .join("&");
-  return c.redirect(`https://payjs.cn/api/cashier?${qs}`);
+  return c.html(renderQrPage(outTradeNo, claimTicket, qrSvg, amount, desc));
 });
 
-// ── PayJS webhook ──────────────────────────────────────────────────────────
-paymentRouter.post("/payjs/webhook", async (c) => {
+// ── /api/v1/payment/wechat/webhook ─────────────────────────────────────────
+paymentRouter.post("/wechat/webhook", async (c) => {
   const { config, db } = c.var.app;
-
-  // Body is form-encoded
-  const formText = await c.req.text();
-  const params: Record<string, string> = {};
-  for (const [k, v] of new URLSearchParams(formText).entries()) {
-    if (v !== "") params[k] = v;
+  const w = config.wechat;
+  if (!w.platformCert || !w.apiV3Key) {
+    console.warn("[wechat] webhook hit but creds missing");
+    return c.json({ code: "FAIL", message: "server not configured" }, 500);
   }
 
-  if (!payjsVerify(params, config.payjsKey)) {
-    console.warn("[payjs] webhook signature mismatch");
-    return c.text("bad signature", 401);
+  const timestamp = c.req.header("Wechatpay-Timestamp") ?? "";
+  const nonce = c.req.header("Wechatpay-Nonce") ?? "";
+  const signature = c.req.header("Wechatpay-Signature") ?? "";
+  const rawBody = await c.req.text();
+
+  const wp = new WechatPay(w);
+  if (!wp.verifyCallback({ timestamp, nonce, body: rawBody, signature })) {
+    console.warn("[wechat] webhook signature invalid");
+    return c.json({ code: "FAIL", message: "signature invalid" }, 401);
   }
 
-  const outTradeNo = params.out_trade_no;
-  if (!outTradeNo) return c.text("missing out_trade_no", 400);
+  let envelope: WechatCallbackEnvelope;
+  try {
+    envelope = JSON.parse(rawBody);
+  } catch {
+    return c.json({ code: "FAIL", message: "bad envelope" }, 400);
+  }
 
+  let plaintext: string;
+  try {
+    plaintext = wp.decryptResource({
+      ciphertext: envelope.resource.ciphertext,
+      associatedData: envelope.resource.associated_data,
+      nonce: envelope.resource.nonce,
+    });
+  } catch (e) {
+    console.error("[wechat] decrypt failed:", e);
+    return c.json({ code: "FAIL", message: "decrypt failed" }, 400);
+  }
+
+  let event: WechatTransactionEvent;
+  try {
+    event = JSON.parse(plaintext);
+  } catch {
+    return c.json({ code: "FAIL", message: "bad event payload" }, 400);
+  }
+
+  if (event.trade_state !== "SUCCESS") {
+    return c.json({ code: "SUCCESS", message: "noted" });
+  }
+
+  const outTradeNo = event.out_trade_no;
   const order = db
     .prepare(`SELECT id, license_key FROM orders WHERE out_trade_no = ?`)
     .get(outTradeNo) as { id: number; license_key: string | null } | undefined;
   if (!order) {
-    console.warn(`[payjs] webhook for unknown order ${outTradeNo}; ignoring`);
-    return c.text("success", 200);
+    console.warn(`[wechat] webhook for unknown order ${outTradeNo}`);
+    return c.json({ code: "SUCCESS", message: "unknown order" });
   }
   if (order.license_key) {
-    return c.text("success", 200); // idempotent
+    return c.json({ code: "SUCCESS", message: "already processed" });
   }
 
   const newKey = generateKey();
   db.prepare(
     `INSERT INTO licenses (key, plan, order_id) VALUES (?, 'lifetime', ?)`,
-  ).run(newKey, params.payjs_order_id ?? "");
+  ).run(newKey, event.transaction_id);
   db.prepare(
     `UPDATE orders
         SET payjs_order_id = ?,
             paid_at = COALESCE(?, datetime('now')),
+            payment_type = 'wechat',
             license_key = ?,
             raw_payload = ?
       WHERE out_trade_no = ?`,
   ).run(
-    params.transaction_id ?? null,
-    params.paid_at ?? null,
+    event.transaction_id,
+    event.success_time,
     newKey,
-    JSON.stringify(params),
+    plaintext,
     outTradeNo,
   );
 
-  console.log(`[payjs] license ${newKey} issued for order ${outTradeNo}`);
-  return c.text("success", 200);
+  console.log(`[wechat] license ${newKey} issued for order ${outTradeNo}`);
+  return c.json({ code: "SUCCESS", message: "ok" });
 });
 
-// ── /api/v1/payment/order_status (JSON poll) ───────────────────────────────
+// ── /api/v1/payment/order_status ──────────────────────────────────────────
 paymentRouter.get("/order_status", (c) => {
   const { db } = c.var.app;
   const o = c.req.query("o") ?? "";
   const t = c.req.query("t") ?? "";
   if (!o || t.length < 32) return c.text("bad params", 403);
-
   const row = db
     .prepare(
       `SELECT (paid_at IS NOT NULL AND license_key IS NOT NULL) AS ready
@@ -137,18 +198,14 @@ export function paymentSuccessHandler() {
     const t = c.req.query("t") ?? "";
     if (!o || t.length < 32) return forbidden(c, "订单参数无效");
 
-    type Row = {
-      paid_at: string | null;
-      license_key: string | null;
-      amount: number;
-    };
     const row = db
       .prepare(
         `SELECT paid_at, license_key, amount FROM orders
           WHERE out_trade_no = ? AND claim_ticket = ?`,
       )
-      .get(o, t) as Row | undefined;
-
+      .get(o, t) as
+      | { paid_at: string | null; license_key: string | null; amount: number }
+      | undefined;
     if (!row) return forbidden(c, "订单不存在或访问令牌无效");
 
     if (row.paid_at && row.license_key) {
@@ -161,6 +218,7 @@ export function paymentSuccessHandler() {
   };
 }
 
+// ── HTML renderers ────────────────────────────────────────────────────────
 function forbidden(c: any, msg: string) {
   const body = `<div class="login-box" style="text-align:center;">
   <h1>访问被拒</h1>
@@ -168,6 +226,63 @@ function forbidden(c: any, msg: string) {
   <p style="color: var(--text-muted); font-size: 12px;">如果你刚完成支付却看到这个页面,请联系客服并提供你的订单号。</p>
 </div>`;
   return c.html(standalone("访问被拒", body), 403);
+}
+
+function renderQrPage(
+  outTradeNo: string,
+  ticket: string,
+  qrSvg: string,
+  amountFen: number,
+  desc: string,
+): string {
+  const oUrl = encodeURIComponent(outTradeNo);
+  const tUrl = encodeURIComponent(ticket);
+  const body = `<div class="login-box" style="width: 480px;">
+  <div style="text-align:center;">
+    <div style="display:inline-flex; align-items:center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: rgba(34,197,94,0.12); margin-bottom: 12px;">
+      <span style="display:inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e;"></span>
+      <span style="font-size: 12px; color: #15803d; font-weight: 500;">微信支付</span>
+    </div>
+    <h1>扫码支付</h1>
+    <p style="color: var(--text-muted); font-size: 12px; margin: 6px 0 18px;">
+      ${htmlEscape(desc)} · <strong style="color: var(--text);">¥${(amountFen / 100).toFixed(2)}</strong>
+    </p>
+  </div>
+
+  <div style="display:flex; justify-content:center; padding: 16px; background: #fff; border-radius: 12px;">
+    ${qrSvg}
+  </div>
+
+  <p style="text-align:center; color: var(--text-secondary); font-size: 12px; margin-top: 14px;">
+    打开微信 → 扫一扫 → 完成支付
+  </p>
+
+  <div id="status" style="margin-top: 16px; padding: 10px 12px; border-radius: 6px; background: var(--surface-elevated); border: 1px solid var(--border); font-size: 12px; color: var(--text-secondary); text-align: center;">
+    <span style="display:inline-block; width: 6px; height: 6px; border-radius: 50%; background: #f59e0b; margin-right: 6px; animation: dm-pulse 1.5s ease-in-out infinite;"></span>
+    等待支付...
+  </div>
+
+  <p class="mono" style="text-align:center; font-size: 10px; color: var(--text-muted); margin-top: 12px;">
+    订单号 ${htmlEscape(outTradeNo)}
+  </p>
+</div>
+<style>
+  @keyframes dm-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+</style>
+<script>
+  const successUrl = "/payment/success?o=${oUrl}&t=${tUrl}";
+  let attempts = 0;
+  const tick = () => {
+    attempts++;
+    if (attempts > 200) return;
+    fetch("/api/v1/payment/order_status?o=${oUrl}&t=${tUrl}", { cache: "no-store" })
+      .then(r => r.json())
+      .then(d => { if (d.ready) location.href = successUrl; else setTimeout(tick, 3000); })
+      .catch(() => setTimeout(tick, 3000));
+  };
+  setTimeout(tick, 3000);
+</script>`;
+  return standalone("扫码支付", body);
 }
 
 function renderPolling(outTradeNo: string, ticket: string): string {
@@ -182,13 +297,9 @@ function renderPolling(outTradeNo: string, ticket: string): string {
   </div>
   <h1>等待支付确认...</h1>
   <p style="color: var(--text-muted); font-size: 13px; line-height: 1.7; margin: 14px 0;">
-    支付平台正在通知我们的服务器,这通常需要 5-15 秒。
-    页面会自动刷新,请勿关闭。
+    支付平台正在通知我们的服务器,这通常需要 5-15 秒。页面会自动刷新,请勿关闭。
   </p>
   <p class="mono" style="font-size: 11px; color: var(--text-muted);">订单:${htmlEscape(outTradeNo)}</p>
-  <p style="color: var(--text-muted); font-size: 12px; margin-top: 24px;">
-    超过 1 分钟仍在此页面?请<a href="mailto:qdzy_cai@163.com" style="color: var(--primary);">联系客服</a>。
-  </p>
   <noscript><p style="color: #ef4444; font-size: 12px;">未启用 JavaScript,请手动刷新本页面。</p></noscript>
 </div>
 <script>
@@ -199,7 +310,7 @@ function renderPolling(outTradeNo: string, ticket: string): string {
     if (attempts > 40) return;
     fetch("/api/v1/payment/order_status?o=${oUrl}&t=${tUrl}", { cache: "no-store" })
       .then(r => r.json())
-      .then(data => { if (data.ready) location.href = reloadUrl; else setTimeout(tick, 3000); })
+      .then(d => { if (d.ready) location.href = reloadUrl; else setTimeout(tick, 3000); })
       .catch(() => setTimeout(tick, 3000));
   };
   setTimeout(tick, 3000);

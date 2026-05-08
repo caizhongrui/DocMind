@@ -2,12 +2,28 @@
  * Runtime configuration loaded from environment variables.
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { sha256Hex } from "./payjs.js";
+import { sha256Hex } from "./util.js";
 
 const env = (key: string, fallback = ""): string =>
   process.env[key] ?? fallback;
+
+/**
+ * Read a PEM file, falling back to an inline env var if the path doesn't
+ * exist. This lets the operator either:
+ *   1. Mount the PEM file into the container and set ..._PATH
+ *   2. Or paste the PEM text directly into ..._PEM (one-line, with \n)
+ */
+function readPem(pathEnv: string, inlineEnv: string): string {
+  const path = env(pathEnv);
+  if (path && existsSync(path)) {
+    return readFileSync(path, "utf8");
+  }
+  const inline = env(inlineEnv);
+  if (inline) return inline.replace(/\\n/g, "\n");
+  return "";
+}
 
 export const config = (() => {
   const dataDir = env("DATA_DIR", "/data");
@@ -20,10 +36,22 @@ export const config = (() => {
 
   const adminPassword = env("ADMIN_PASSWORD", "change-me");
 
+  const wechatMchId = env("WECHAT_MCH_ID");
+  const wechatAppId = env("WECHAT_APP_ID");
+  const wechatApiV3Key = env("WECHAT_API_V3_KEY");
+  const wechatCertSerialNo = env("WECHAT_MCH_CERT_SERIAL_NO");
+  const wechatPrivateKey = readPem("WECHAT_MCH_PRIVATE_KEY_PATH", "WECHAT_MCH_PRIVATE_KEY");
+  const wechatPlatformCert = readPem("WECHAT_PLATFORM_CERT_PATH", "WECHAT_PLATFORM_CERT");
+  const domain = env("DOMAIN", "doc-api.boyobang.com");
+  const wechatNotifyUrl = env(
+    "WECHAT_NOTIFY_URL",
+    `https://${domain}/api/v1/payment/wechat/webhook`,
+  );
+
   return {
-    domain: env("DOMAIN", "doc-api.boyobang.com"),
+    domain,
     portalDomain: env("PORTAL_DOMAIN", "doc-web.boyobang.com"),
-    listenPort: parseInt(env("PORT", "8081"), 10),
+    listenPort: parseInt(env("PORT", "8080"), 10),
     listenHost: env("HOST", "0.0.0.0"),
     dataDir,
     dbPath,
@@ -32,12 +60,15 @@ export const config = (() => {
     adminUsername: env("ADMIN_USERNAME", "admin"),
     adminPassword,
     adminPasswordHash: sha256Hex(Buffer.from(adminPassword)),
-    payjsMerchantId: env("PAYJS_MERCHANT_ID"),
-    payjsKey: env("PAYJS_KEY"),
-    payjsNotifyUrl: env(
-      "PAYJS_NOTIFY_URL",
-      `https://${env("DOMAIN", "doc-api.boyobang.com")}/api/v1/payment/payjs/webhook`
-    ),
+    wechat: {
+      mchId: wechatMchId,
+      appId: wechatAppId,
+      apiV3Key: wechatApiV3Key,
+      certSerialNo: wechatCertSerialNo,
+      privateKey: wechatPrivateKey,
+      platformCert: wechatPlatformCert,
+      notifyUrl: wechatNotifyUrl,
+    },
     priceLifetimeFen: parseInt(env("PRICE_LIFETIME_FEN", "2000"), 10),
   };
 })();
