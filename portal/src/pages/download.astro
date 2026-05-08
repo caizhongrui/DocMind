@@ -3,33 +3,30 @@ import Layout from "../layouts/Layout.astro";
 
 const platforms = [
   {
+    id: "darwin-aarch64",
     name: "macOS",
     arch: "Apple Silicon · macOS 12+",
-    file: "DocMind_aarch64.dmg",
-    url: "https://doc-api.boyobang.com/releases/darwin-aarch64/DocMind_aarch64.dmg",
-    size: "~85 MB",
-    icon: "M19 11.2c0-2.5-2.1-4.5-4.7-4.5-1.4 0-2.6.6-3.5 1.5-.9-.9-2.1-1.5-3.5-1.5C4.6 6.7 2.5 8.7 2.5 11.2c0 6.8 8.5 11.3 8.5 11.3s8.5-4.5 8.5-11.3z",
     description: "M1/M2/M3/M4 系列 Mac",
+    icon: "M19 11.2c0-2.5-2.1-4.5-4.7-4.5-1.4 0-2.6.6-3.5 1.5-.9-.9-2.1-1.5-3.5-1.5C4.6 6.7 2.5 8.7 2.5 11.2c0 6.8 8.5 11.3 8.5 11.3s8.5-4.5 8.5-11.3z",
   },
   {
+    id: "darwin-x86_64",
     name: "macOS",
     arch: "Intel · macOS 12+",
-    file: "DocMind_x64.dmg",
-    url: "https://doc-api.boyobang.com/releases/darwin-x86_64/DocMind_x64.dmg",
-    size: "~92 MB",
-    icon: "M19 11.2c0-2.5-2.1-4.5-4.7-4.5-1.4 0-2.6.6-3.5 1.5-.9-.9-2.1-1.5-3.5-1.5C4.6 6.7 2.5 8.7 2.5 11.2c0 6.8 8.5 11.3 8.5 11.3s8.5-4.5 8.5-11.3z",
     description: "Intel 架构 Mac",
+    icon: "M19 11.2c0-2.5-2.1-4.5-4.7-4.5-1.4 0-2.6.6-3.5 1.5-.9-.9-2.1-1.5-3.5-1.5C4.6 6.7 2.5 8.7 2.5 11.2c0 6.8 8.5 11.3 8.5 11.3s8.5-4.5 8.5-11.3z",
   },
   {
+    id: "windows-x86_64",
     name: "Windows",
     arch: "x64 · Windows 10/11",
-    file: "DocMind_x64.msi",
-    url: "https://doc-api.boyobang.com/releases/windows-x86_64/DocMind_x64.msi",
-    size: "~78 MB",
-    icon: "M3 5h8v8H3zM13 5h8v8h-8zM3 11h8v8H3zM13 11h8v8h-8z",
     description: "64 位 Windows 安装包",
+    icon: "M3 5h8v8H3zM13 5h8v8h-8zM3 11h8v8H3zM13 11h8v8h-8z",
   },
 ];
+
+const API_BASE =
+  import.meta.env.PUBLIC_API_BASE ?? "https://doc-api.boyobang.com";
 ---
 
 <Layout
@@ -47,9 +44,12 @@ const platforms = [
 
   <section class="bg-white">
     <div class="mx-auto max-w-5xl px-6 py-16">
-      <div class="grid gap-5 md:grid-cols-3">
+      <div class="grid gap-5 md:grid-cols-3" id="platform-grid">
         {platforms.map((p) => (
-          <div class="rounded-2xl border border-ink-200 bg-white p-6 transition hover:border-primary-300 hover:shadow-lg">
+          <div
+            class="rounded-2xl border border-ink-200 bg-white p-6 transition hover:border-primary-300 hover:shadow-lg"
+            data-platform={p.id}
+          >
             <div class="flex items-center gap-3">
               <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-50 text-primary-600">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
@@ -62,21 +62,28 @@ const platforms = [
               </div>
             </div>
             <p class="mt-4 text-sm text-ink-600">{p.description}</p>
-            <a
-              href={p.url}
-              class="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-ink-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-ink-800"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+
+            <div class="dl-state mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-ink-100 px-4 py-2.5 text-sm font-medium text-ink-500">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4 animate-spin">
+                <path d="M21 12a9 9 0 1 1-6.22-8.55" />
               </svg>
-              下载
-            </a>
-            <div class="mt-3 flex items-center justify-between font-mono text-xs text-ink-400">
-              <span>{p.file}</span>
-              <span>{p.size}</span>
+              加载中…
+            </div>
+            <div class="dl-meta mt-3 flex items-center justify-between font-mono text-xs text-ink-400">
+              <span class="dl-file">—</span>
+              <span class="dl-size">—</span>
             </div>
           </div>
         ))}
+      </div>
+
+      <div
+        id="all-pending"
+        class="mx-auto mt-10 hidden max-w-2xl rounded-xl border border-amber-200 bg-amber-50 p-5 text-center text-sm text-amber-900"
+      >
+        <strong>客户端正在准备中。</strong>
+        我们会在第一个版本发布后第一时间在此页面提供下载链接。
+        如有内测邀请需要,请通过<a class="font-medium underline" href="/contact">联系页面</a>告知我们。
       </div>
     </div>
   </section>
@@ -133,3 +140,68 @@ const platforms = [
     </div>
   </section>
 </Layout>
+
+<script is:inline define:vars={{ API_BASE }}>
+  function bytes(n) {
+    if (!n || n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
+    return (n / 1024 / 1024 / 1024).toFixed(2) + " GB";
+  }
+
+  function renderState(card, info) {
+    const stateEl = card.querySelector(".dl-state");
+    const fileEl = card.querySelector(".dl-file");
+    const sizeEl = card.querySelector(".dl-size");
+    if (!stateEl || !fileEl || !sizeEl) return;
+
+    if (info && info.url) {
+      stateEl.outerHTML = `
+        <a href="${info.url}"
+           class="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-ink-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-ink-800">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+          </svg>
+          下载 v${info.version}
+        </a>`;
+      fileEl.textContent = info.file;
+      sizeEl.textContent = bytes(info.size);
+    } else {
+      stateEl.outerHTML = `
+        <div class="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-700">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+            <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>
+          </svg>
+          待上传
+        </div>`;
+      fileEl.textContent = "—";
+      sizeEl.textContent = "尚未发布";
+    }
+  }
+
+  fetch(`${API_BASE}/api/v1/releases/latest`, { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : {}))
+    .then((data) => {
+      const grid = document.getElementById("platform-grid");
+      if (!grid) return;
+      let anyAvailable = false;
+      grid.querySelectorAll("[data-platform]").forEach((card) => {
+        const id = card.getAttribute("data-platform");
+        const info = (data && id && data[id]) || null;
+        if (info) anyAvailable = true;
+        renderState(card, info);
+      });
+      if (!anyAvailable) {
+        const banner = document.getElementById("all-pending");
+        if (banner) banner.classList.remove("hidden");
+      }
+    })
+    .catch((err) => {
+      console.warn("[download] fetch failed:", err);
+      document.querySelectorAll("#platform-grid [data-platform]").forEach((card) => {
+        renderState(card, null);
+      });
+      const banner = document.getElementById("all-pending");
+      if (banner) banner.classList.remove("hidden");
+    });
+</script>

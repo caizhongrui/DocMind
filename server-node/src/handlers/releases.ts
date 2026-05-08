@@ -61,7 +61,57 @@ apiReleasesRouter.get("/releases/public", (c) => {
         ORDER BY published_at DESC LIMIT 50`,
     )
     .all() as { version: string; published_at: string; notes: string }[];
+  c.header("access-control-allow-origin", "*");
+  c.header("cache-control", "public, max-age=60");
   return c.json(rows);
+});
+
+/**
+ * Latest release per platform — used by the portal's `/download` page to
+ * show version numbers + active download links (or a "待上传" placeholder
+ * when nothing has been published yet for a given platform).
+ */
+apiReleasesRouter.get("/releases/latest", (c) => {
+  const { db, config } = c.var.app;
+  const rows = db
+    .prepare(
+      `SELECT platform, version, file_path, size, published_at
+         FROM releases r
+        WHERE published_at = (
+          SELECT MAX(published_at) FROM releases r2 WHERE r2.platform = r.platform
+        )`,
+    )
+    .all() as Array<{
+    platform: string;
+    version: string;
+    file_path: string;
+    size: number;
+    published_at: string;
+  }>;
+
+  const byPlatform: Record<
+    string,
+    {
+      version: string;
+      file: string;
+      size: number;
+      published_at: string;
+      url: string;
+    }
+  > = {};
+  for (const r of rows) {
+    byPlatform[r.platform] = {
+      version: r.version,
+      file: r.file_path,
+      size: r.size,
+      published_at: r.published_at,
+      url: `https://${config.domain}/releases/${encodeURIComponent(r.platform)}/${encodeURIComponent(r.file_path)}`,
+    };
+  }
+
+  c.header("access-control-allow-origin", "*");
+  c.header("cache-control", "public, max-age=60");
+  return c.json(byPlatform);
 });
 
 // ── Public download router (mounted at /releases/*) ───────────────────────
