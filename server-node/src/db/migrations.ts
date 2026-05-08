@@ -37,6 +37,7 @@ export function applyMigrations(db: Database) {
       license_key     TEXT,
       claim_ticket    TEXT,
       claim_consumed_at TEXT,
+      bound_fingerprint TEXT,
       raw_payload     TEXT,
       created_at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -113,6 +114,7 @@ export function applyMigrations(db: Database) {
   // Forward migrations for existing installs (post-schema additions).
   alterSafe(db, "ALTER TABLE orders ADD COLUMN claim_ticket TEXT");
   alterSafe(db, "ALTER TABLE orders ADD COLUMN claim_consumed_at TEXT");
+  alterSafe(db, "ALTER TABLE orders ADD COLUMN bound_fingerprint TEXT");
 }
 
 function alterSafe(db: Database, sql: string) {

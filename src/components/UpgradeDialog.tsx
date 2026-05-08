@@ -4,10 +4,11 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useLicenseStore } from "../stores/licenseStore";
 
-// Open the API server's /checkout page (renders the WeChat Pay QR).
-// The marketing portal at doc-web.boyobang.com is info-only and has no
-// purchase UI — purchases always happen on doc-api.boyobang.com.
-const CHECKOUT_URL = "https://doc-api.boyobang.com/api/v1/payment/checkout?plan=lifetime";
+// Base URL of the API server's /checkout page (renders the WeChat Pay QR).
+// We append the current device fingerprint so the webhook can auto-bind
+// the issued license — the success page then hands back a ready-to-paste
+// signed token JSON, skipping the round-trip back through /api/v1/license/activate.
+const CHECKOUT_BASE = "https://doc-api.boyobang.com/api/v1/payment/checkout?plan=lifetime";
 
 const REASON_TITLE: Record<string, string> = {
   custom_gguf: "导入自定义模型 — Pro 功能",
@@ -67,9 +68,16 @@ export default function UpgradeDialog() {
   const desc =
     upgradeRequest?.message ?? REASON_DESC[reason] ?? "升级到 Pro 解锁此功能。";
 
-  const handleBuy = () => {
-    invoke("plugin:opener|open_url", { url: CHECKOUT_URL }).catch(() => {
-      window.open(CHECKOUT_URL, "_blank");
+  const handleBuy = async () => {
+    let url = CHECKOUT_BASE;
+    try {
+      const fp = await invoke<string>("get_hardware_fingerprint");
+      if (fp) url += `&fp=${encodeURIComponent(fp)}`;
+    } catch {
+      // fall through with no fp — the server will still accept the order
+    }
+    invoke("plugin:opener|open_url", { url }).catch(() => {
+      window.open(url, "_blank");
     });
   };
 

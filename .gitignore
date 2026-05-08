@@ -24,3 +24,4 @@ dist-ssr
 *.sw?
 src-tauri/target
 poc/*/target
+.claude/scheduled_tasks.lock

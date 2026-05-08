@@ -38,6 +38,11 @@ paymentRouter.get("/checkout", async (c) => {
   const { config, db } = c.var.app;
   const plan = c.req.query("plan") ?? "lifetime";
   const email = c.req.query("email") ?? "";
+  // Optional hardware fingerprint passed from the client. When present the
+  // license issued by the webhook is auto-bound to it, so the success page
+  // can hand back a ready-to-paste signed token.
+  const fpRaw = (c.req.query("fp") ?? "").trim().toLowerCase();
+  const fp = /^[0-9a-f]{16,128}$/.test(fpRaw) ? fpRaw : null;
   if (plan !== "lifetime") return c.text("unknown plan", 400);
 
   const w = config.wechat;
@@ -64,9 +69,9 @@ paymentRouter.get("/checkout", async (c) => {
   const desc = "DocMind Pro 终身授权";
 
   db.prepare(
-    `INSERT INTO orders (out_trade_no, amount, claim_ticket, raw_payload)
-     VALUES (?, ?, ?, ?)`,
-  ).run(outTradeNo, amount, claimTicket, email);
+    `INSERT INTO orders (out_trade_no, amount, claim_ticket, bound_fingerprint, raw_payload)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(outTradeNo, amount, claimTicket, fp, email);
 
   const wp = new WechatPay(w);
   let codeUrl: string;
@@ -153,8 +158,12 @@ paymentRouter.post("/wechat/webhook", async (c) => {
 
   const outTradeNo = event.out_trade_no;
   const order = db
-    .prepare(`SELECT id, license_key FROM orders WHERE out_trade_no = ?`)
-    .get(outTradeNo) as { id: number; license_key: string | null } | undefined;
+    .prepare(
+      `SELECT id, license_key, bound_fingerprint FROM orders WHERE out_trade_no = ?`,
+    )
+    .get(outTradeNo) as
+    | { id: number; license_key: string | null; bound_fingerprint: string | null }
+    | undefined;
   if (!order) {
     console.warn(`[wechat] webhook for unknown order ${outTradeNo}`);
     return c.json({ code: "SUCCESS", message: "unknown order" });
@@ -164,9 +173,17 @@ paymentRouter.post("/wechat/webhook", async (c) => {
   }
 
   const newKey = generateKey();
-  db.prepare(
-    `INSERT INTO licenses (key, plan, order_id) VALUES (?, 'lifetime', ?)`,
-  ).run(newKey, event.transaction_id);
+  if (order.bound_fingerprint) {
+    db.prepare(
+      `INSERT INTO licenses
+         (key, plan, order_id, bound_fingerprint, bound_at, machine_label)
+       VALUES (?, 'lifetime', ?, ?, datetime('now'), '购买时绑定')`,
+    ).run(newKey, event.transaction_id, order.bound_fingerprint);
+  } else {
+    db.prepare(
+      `INSERT INTO licenses (key, plan, order_id) VALUES (?, 'lifetime', ?)`,
+    ).run(newKey, event.transaction_id);
+  }
   db.prepare(
     `UPDATE orders
         SET payjs_order_id = ?,
@@ -275,18 +292,24 @@ paymentRouter.get("/order_status", (c) => {
 // ── /payment/success (HTML, registered on the app root) ────────────────────
 export function paymentSuccessHandler() {
   return async (c: any) => {
-    const { db } = c.var.app;
+    const { db, signingKey } = c.var.app;
     const o = c.req.query("o") ?? "";
     const t = c.req.query("t") ?? "";
     if (!o || t.length < 32) return forbidden(c, "订单参数无效");
 
     const row = db
       .prepare(
-        `SELECT paid_at, license_key, amount FROM orders
+        `SELECT paid_at, license_key, amount, bound_fingerprint
+           FROM orders
           WHERE out_trade_no = ? AND claim_ticket = ?`,
       )
       .get(o, t) as
-      | { paid_at: string | null; license_key: string | null; amount: number }
+      | {
+          paid_at: string | null;
+          license_key: string | null;
+          amount: number;
+          bound_fingerprint: string | null;
+        }
       | undefined;
     if (!row) return forbidden(c, "订单不存在或访问令牌无效");
 
@@ -294,7 +317,23 @@ export function paymentSuccessHandler() {
       db.prepare(
         `UPDATE orders SET claim_consumed_at = COALESCE(claim_consumed_at, datetime('now')) WHERE out_trade_no = ?`,
       ).run(o);
-      return c.html(renderLicenseKey(o, row.license_key, row.amount));
+
+      // If we know the fingerprint already (client passed fp= during checkout
+      // and the webhook auto-bound the license), produce a ready-to-paste
+      // signed token JSON. Saves the user from running through the activate
+      // round-trip back in the client.
+      let tokenJson: string | null = null;
+      if (row.bound_fingerprint) {
+        const { signToken } = await import("../license/sign.js");
+        tokenJson = await signToken(signingKey.privateKey, {
+          key: row.license_key,
+          plan: "lifetime",
+          fingerprint: row.bound_fingerprint,
+          issuedAt: new Date(),
+          expiresAt: null,
+        });
+      }
+      return c.html(renderLicenseKey(o, row.license_key, row.amount, tokenJson));
     }
     return c.html(renderPolling(o, t));
   };
@@ -404,7 +443,23 @@ function renderLicenseKey(
   outTradeNo: string,
   key: string,
   amountFen: number,
+  tokenJson: string | null,
 ): string {
+  const tokenBlock = tokenJson
+    ? `
+  <h2 style="margin-top: 24px;">离线 Token(本机一键激活)</h2>
+  <p style="color: var(--text-muted); font-size: 12px; line-height: 1.7; margin: 0 0 8px;">
+    我们已识别到你的设备并把 license 绑定到本机。复制下方 token JSON,在 DocMind 客户端的"升级 → 离线激活"页粘贴即可激活,无需再走在线流程。
+  </p>
+  <textarea id="token-json" readonly style="width: 100%; min-height: 160px; font-family: var(--font-mono);
+    font-size: 11px; padding: 12px; background: var(--surface-elevated);
+    border: 1px solid var(--border); border-radius: 8px; color: var(--text);
+    resize: vertical;">${htmlEscape(tokenJson)}</textarea>
+  <div style="display:flex; gap: 8px; margin-top: 8px;">
+    <button class="primary" onclick="copyToken()" style="flex:1;">复制 Token JSON</button>
+  </div>`
+    : "";
+
   const body = `<div class="login-box" style="width: 540px;">
   <div style="text-align:center;">
     <div style="display:inline-flex; width: 56px; height: 56px; border-radius: 14px;
@@ -443,11 +498,13 @@ function renderLicenseKey(
     </ol>
   </div>
 
+  ${tokenBlock}
+
   <h2 style="margin-top: 24px;">如何激活</h2>
   <ol style="font-size: 13px; line-height: 1.8; padding-left: 20px;">
     <li>打开 DocMind 应用,点顶栏的 license 状态条</li>
-    <li>点"已购买,输入 license key 激活"</li>
-    <li>粘贴上方的 key,点"激活"</li>
+    <li>${tokenJson ? "切到\"离线激活\",粘贴上方的 token JSON" : "点\"已购买,输入 license key 激活\",粘贴上方的 key"}</li>
+    <li>点"激活"</li>
   </ol>
 
   <div style="margin-top: 16px; padding: 12px 14px; background: rgba(239,68,68,0.06);
@@ -461,6 +518,11 @@ function renderLicenseKey(
   function copyKey() {
     const text = document.getElementById('license-key').textContent.trim();
     navigator.clipboard.writeText(text).then(() => alert('已复制!'));
+  }
+  function copyToken() {
+    const el = document.getElementById('token-json');
+    if (!el) return;
+    navigator.clipboard.writeText(el.value).then(() => alert('Token 已复制!'));
   }
 </script>`;
   return standalone("支付成功", body);
