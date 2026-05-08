@@ -52,8 +52,33 @@ function detectOfficeFormat(buf: ArrayBuffer): "ooxml" | "cfb" | "unknown" {
   return "unknown";
 }
 
-const LEGACY_BINARY_MSG =
-  "暂不支持旧版二进制格式（Word 97-2003 .doc / Excel 97-2003 .xls / PowerPoint 97-2003 .ppt）的内嵌预览。请用 Word/Excel/PowerPoint 或 LibreOffice 另存为 .docx / .xlsx / .pptx 后再预览。";
+function htmlEscape(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Render a Rust-side text-extractor output (legacy .doc / .ppt) as a
+ *  read-only document with a banner explaining the limited fidelity. */
+function buildPlainTextHtml(text: string, banner: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, "Segoe UI", sans-serif; font-size: 13px;
+           line-height: 1.7; padding: 16px 24px 24px; color: #333; margin: 0; }
+    .banner {
+      font-size: 11px; color: #92400e; background: rgba(245,158,11,0.10);
+      border: 1px solid rgba(245,158,11,0.28); border-radius: 6px;
+      padding: 6px 10px; margin-bottom: 14px;
+    }
+    pre { white-space: pre-wrap; word-wrap: break-word; font-family: inherit; margin: 0; }
+  </style></head><body>
+    <div class="banner">${htmlEscape(banner)} · 旧版二进制格式仅支持文本提取,无法保留图片 / 表格 / 排版。如需完整预览请另存为新格式。</div>
+    <pre>${htmlEscape(text)}</pre>
+  </body></html>`;
+}
 
 function buildDocxHtml(body: string): string {
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
@@ -173,9 +198,13 @@ export default function OfficePreview({ path, fileType }: Props) {
 
         if (ft === "docx" || ft === "doc") {
           if (fmt === "cfb") {
-            // Real legacy .doc — pure-JS parsers exist (e.g. word-extractor)
-            // but they're heavy and partial. Surface a clean message.
-            throw new Error(LEGACY_BINARY_MSG);
+            // Legacy Word97 .doc — fall back to the Rust-side
+            // best-effort text extractor (utf16le byte scanner).
+            // Render as plain text in a styled iframe so the user
+            // still gets *something* useful instead of an error.
+            const text = await invoke<string>("read_file_preview", { path });
+            if (!cancelled) setDocHtml(buildPlainTextHtml(text, "Word 97-2003 (.doc) · 仅文本预览"));
+            return;
           }
           const mammoth = (await import("mammoth")).default;
           const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
@@ -195,7 +224,10 @@ export default function OfficePreview({ path, fileType }: Props) {
 
         } else if (ft === "pptx" || ft === "ppt") {
           if (fmt === "cfb") {
-            throw new Error(LEGACY_BINARY_MSG);
+            // Legacy PowerPoint97 — same fallback as .doc above.
+            const text = await invoke<string>("read_file_preview", { path });
+            if (!cancelled) setDocHtml(buildPlainTextHtml(text, "PowerPoint 97-2003 (.ppt) · 仅文本预览"));
+            return;
           }
           const JSZip = (await import("jszip")).default;
           const zip = await JSZip.loadAsync(buffer);
@@ -300,6 +332,17 @@ export default function OfficePreview({ path, fileType }: Props) {
 
   // ── PPTX / PPT ──
   if (ft === "pptx" || ft === "ppt") {
+    // Legacy .ppt path: docHtml carries text-only fallback.
+    if (docHtml) {
+      return (
+        <iframe
+          ref={iframeRef}
+          srcDoc={docHtml}
+          style={{ flex: 1, width: "100%", height: "100%", border: "none" }}
+          title="文档预览"
+        />
+      );
+    }
     if (pptxSlides.length === 0)
       return <Empty description="未找到幻灯片内容" style={{ marginTop: 40 }} />;
     return (
