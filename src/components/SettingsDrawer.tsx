@@ -21,16 +21,24 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n/index";
 import { THEME_KEY, type ThemeMode } from "../main";
+import { useLicenseStore } from "../stores/licenseStore";
 
 // ── 文件类型分组定义 ──────────────────────────────────────────────────────────
+//
+// `pro: true` 的分组只有 Pro / Trial 用户可以勾选；Free 用户点 chip 会
+// 直接弹升级对话框,reason="ocr_indexing"。
 const FILE_TYPE_GROUPS = [
   { label: "文档", types: ["pdf", "docx", "doc", "pptx", "ppt", "rtf"] },
   { label: "表格", types: ["xlsx", "xls", "csv"] },
   { label: "文本/标记", types: ["txt", "md", "rst"] },
   { label: "归档", types: ["zip"] },
+  { label: "图像 (OCR)", types: ["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"], pro: true },
 ] as const;
 
 const ALL_TYPES = FILE_TYPE_GROUPS.flatMap((g) => [...g.types]);
+const PRO_ONLY_TYPES: Set<string> = new Set(
+  FILE_TYPE_GROUPS.filter((g) => "pro" in g && g.pro).flatMap((g) => [...g.types]),
+);
 
 const DRAWER_STYLES = {
   wrapper: { width: 480 },
@@ -305,7 +313,17 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
     }
   };
 
+  const licensePlan = useLicenseStore((s) => s.status?.plan);
+  const showUpgrade = useLicenseStore((s) => s.showUpgrade);
+  const isPro = licensePlan === "pro" || licensePlan === "trial";
+
   const toggleType = (ext: string) => {
+    // Pro-only types: gate enabling. Disabling stays free so a user who
+    // bought Pro then downgraded can still turn things off.
+    if (PRO_ONLY_TYPES.has(ext) && !isPro && !enabledTypes.includes(ext)) {
+      showUpgrade("ocr_indexing");
+      return;
+    }
     setEnabledTypes((prev) =>
       prev.includes(ext) ? prev.filter((e) => e !== ext) : [...prev, ext]
     );
@@ -621,40 +639,72 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
             只有启用的类型才会被索引和检索。修改后需重新索引已有文件夹才能完全生效。
           </Typography.Text>
 
-          {FILE_TYPE_GROUPS.map((group) => (
-            <div key={group.label} style={{ marginBottom: 12 }}>
-              <Typography.Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 6 }}>
-                {group.label}
-              </Typography.Text>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {group.types.map((ext) => {
-                  const active = enabledTypes.includes(ext);
-                  return (
-                    <button
-                      key={ext}
-                      onClick={() => toggleType(ext)}
-                      className={active ? "chip chip-primary" : "chip"}
+          {FILE_TYPE_GROUPS.map((group) => {
+            const isProGroup = "pro" in group && group.pro;
+            const locked = isProGroup && !isPro;
+            return (
+              <div key={group.label} style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                    {group.label}
+                  </Typography.Text>
+                  {isProGroup && (
+                    <span
+                      className="chip chip-primary"
                       style={{
-                        cursor: "pointer",
-                        fontFamily: "var(--font-mono)",
-                        height: 22,
-                        padding: "0 8px",
-                        fontSize: 11,
-                        opacity: active ? 1 : 0.6,
+                        height: 16,
+                        padding: "0 6px",
+                        fontSize: 9,
+                        letterSpacing: "0.04em",
+                        textTransform: "uppercase",
                       }}
                     >
-                      {ext}
-                    </button>
-                  );
-                })}
+                      Pro
+                    </span>
+                  )}
+                  {locked && (
+                    <Typography.Text style={{ fontSize: 10, color: "var(--color-text-muted)" }}>
+                      升级解锁 OCR 扫描件 / 图片识别
+                    </Typography.Text>
+                  )}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {group.types.map((ext) => {
+                    const active = enabledTypes.includes(ext);
+                    return (
+                      <button
+                        key={ext}
+                        onClick={() => toggleType(ext)}
+                        className={active ? "chip chip-primary" : "chip"}
+                        style={{
+                          cursor: "pointer",
+                          fontFamily: "var(--font-mono)",
+                          height: 22,
+                          padding: "0 8px",
+                          fontSize: 11,
+                          opacity: active ? 1 : (locked ? 0.4 : 0.6),
+                        }}
+                        title={locked ? "Pro 功能 — 点击升级" : undefined}
+                      >
+                        {ext}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <Button
               size="small"
-              onClick={() => setEnabledTypes([...ALL_TYPES])}
+              onClick={() =>
+                setEnabledTypes(
+                  isPro
+                    ? [...ALL_TYPES]
+                    : ALL_TYPES.filter((t) => !PRO_ONLY_TYPES.has(t)),
+                )
+              }
               style={{ fontSize: 12 }}
             >
               全选
