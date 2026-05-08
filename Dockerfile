@@ -1,35 +1,15 @@
 # syntax=docker/dockerfile:1.6
 #
-# Multi-stage build for the DocMind self-hosted backend + marketing portal.
+# DocMind self-hosted backend — Axum API only.
 #
-# Stage layout:
-#   1. portal-build  — Astro static site (pure HTML/CSS/JS)
-#   2. server-build  — Rust Axum server binary
-#   3. runtime       — Debian slim + Caddy + the two artifacts
-#
-# Final image is one container that:
-#   - serves doc-api.boyobang.com via Axum on :8080 behind Caddy reverse-proxy
-#   - serves doc-web.boyobang.com as static files from /app/portal
-#   - persists state under /data (mount this as a volume)
+# 宝塔面板部署模式:
+#   - 容器只跑 Rust API,监听 :8080,不处理 SSL
+#   - 宝塔 Nginx 在宿主机终止 SSL,反向代理 doc-api.boyobang.com → 127.0.0.1:8080
+#   - 门户站(portal/)是纯静态站,build 后上传到宝塔某个网站根目录,由宝塔 Nginx
+#     直接 file_server,不进入这个容器
 
 # ────────────────────────────────────────────────────────────────────────────
-# 1. Portal (Astro)
-# ────────────────────────────────────────────────────────────────────────────
-FROM node:20-alpine AS portal-build
-WORKDIR /portal
-
-# Cache deps — copy package manifest first
-COPY portal/package.json ./
-
-# Astro doesn't ship a lockfile in this repo, so generate fresh.
-RUN npm install --no-audit --no-fund
-
-# Copy the rest of the portal source and build
-COPY portal/ ./
-RUN npm run build
-
-# ────────────────────────────────────────────────────────────────────────────
-# 2. Server (Rust + Axum)
+# Stage 1: Rust build
 # ────────────────────────────────────────────────────────────────────────────
 FROM rust:1.83-slim AS server-build
 WORKDIR /server
@@ -39,48 +19,39 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy manifest first for caching
+# Cache deps
 COPY server/Cargo.toml server/Cargo.lock ./
-
-# Pre-fetch + warm up dependency build
 RUN mkdir -p src && echo "fn main() {}" > src/main.rs && cargo build --release && rm -rf src
 
-# Copy real source
+# Real source
 COPY server/src ./src
 RUN touch src/main.rs && cargo build --release
 
 # ────────────────────────────────────────────────────────────────────────────
-# 3. Runtime
+# Stage 2: Runtime — Debian slim + ca-certificates only
 # ────────────────────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
 
-# Caddy + ca-certificates (for outbound HTTPS to PayJS) + tini
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         tini \
-        curl \
-        debian-keyring debian-archive-keyring apt-transport-https gnupg \
-    && curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
-    && curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt > /etc/apt/sources.list.d/caddy-stable.list \
-    && apt-get update && apt-get install -y --no-install-recommends caddy \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy artifacts
-COPY --from=portal-build  /portal/dist                       /app/portal
-COPY --from=server-build  /server/target/release/docmind-server  /usr/local/bin/docmind-server
-COPY Caddyfile                                                /etc/caddy/Caddyfile
-COPY entrypoint.sh                                            /entrypoint.sh
+COPY --from=server-build /server/target/release/docmind-server /usr/local/bin/docmind-server
+COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh /usr/local/bin/docmind-server
 
-# Default config — override at runtime
+# Bind to 0.0.0.0 inside the container so the host's BT Nginx can reach
+# us via the published port. The docker-compose `ports:` mapping limits
+# external access to 127.0.0.1 on the host.
 ENV DATA_DIR=/data \
-    LISTEN_ADDR=127.0.0.1:8080 \
+    LISTEN_ADDR=0.0.0.0:8080 \
     DOMAIN=doc-api.boyobang.com \
     PORTAL_DOMAIN=doc-web.boyobang.com
 
-EXPOSE 80 443
+EXPOSE 8080
 
 VOLUME ["/data"]
 

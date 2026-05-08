@@ -1,32 +1,33 @@
-# DocMind self-hosted backend — single container, single command deploy.
+# DocMind self-hosted backend — Axum API container.
+#
+# 部署模式:宝塔面板统一处理 SSL + 静态门户。
+#   - 这个容器只跑 Rust API,绑定到宿主机 loopback 上的 8080 端口
+#   - 宝塔 Nginx 用 reverse_proxy 转发 doc-api.boyobang.com → 127.0.0.1:8080
+#   - 门户站独立部署在宝塔的另一个站点(静态文件)
 #
 # Usage:
-#   1. Copy .env.example to .env and fill in your secrets.
-#   2. docker compose up -d
-#
-# All persistent state (SQLite database, Ed25519 private key, uploaded
-# release binaries) lives in ./data — back this up.
+#   1. cp .env.example .env && vi .env
+#   2. docker compose up -d --build
 
 services:
   docmind-server:
     image: docmind/server:latest
-    # If you don't have the prebuilt image yet, replace `image:` with `build: .`
     build:
       context: .
       dockerfile: Dockerfile
     container_name: docmind-server
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      # ⚠️ 仅绑定 127.0.0.1,只有宿主机的宝塔 Nginx 能访问。如果你需要从其他
+      # 机器直连(不通过宝塔),改成 "8080:8080"。
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./data:/data
     environment:
       DATA_DIR: /data
-      LISTEN_ADDR: 127.0.0.1:8080
+      LISTEN_ADDR: 0.0.0.0:8080
       DOMAIN: ${DOMAIN:-doc-api.boyobang.com}
       PORTAL_DOMAIN: ${PORTAL_DOMAIN:-doc-web.boyobang.com}
-      ACME_EMAIL: ${ACME_EMAIL}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       PAYJS_MERCHANT_ID: ${PAYJS_MERCHANT_ID}
