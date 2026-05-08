@@ -30,6 +30,21 @@ const DEFAULT_SIDER_WIDTH = 420;
 const MIN_SIDER_WIDTH = 200;
 const MAX_SIDER_WIDTH = 840;
 
+// Hoisted out of the component so antd doesn't see a fresh `styles` object
+// on every render — that causes a 1-frame flash during the close animation.
+const QA_DRAWER_STYLES = {
+  wrapper: { width: 520 },
+  header: { borderBottom: "1px solid var(--color-border)", paddingBottom: 12 },
+  body: {
+    display: "flex" as const,
+    flexDirection: "column" as const,
+    height: "100%",
+    padding: 16,
+    background: "var(--color-bg)",
+  },
+};
+const MODEL_DRAWER_STYLES = { wrapper: { width: 600 } };
+
 interface ModelStatus {
   available: boolean;
   model_dir: string;
@@ -488,11 +503,7 @@ export default function App() {
         open={qaOpen}
         onClose={() => setQaOpen(false)}
         forceRender
-        styles={{
-          wrapper: { width: 520 },
-          header: { borderBottom: "1px solid var(--color-border)", paddingBottom: 12 },
-          body: { display: "flex", flexDirection: "column", height: "100%", padding: 16, background: "var(--color-bg)" },
-        }}
+        styles={QA_DRAWER_STYLES}
       >
         <QAPanel />
       </Drawer>
@@ -507,7 +518,7 @@ export default function App() {
         open={modelOpen}
         onClose={() => setModelOpen(false)}
         forceRender
-        styles={{ wrapper: { width: 600 } }}
+        styles={MODEL_DRAWER_STYLES}
       >
         <ModelManager
           onModelReady={() => {

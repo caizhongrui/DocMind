@@ -114,6 +114,12 @@ function SectionCard({
 
 const CONTACT_EMAIL = "qdzy_cai@163.com";
 
+const DRAWER_STYLES = {
+  wrapper: { width: 480 },
+  body: { padding: "20px 24px", background: "var(--color-bg)" },
+  header: { borderBottom: "1px solid var(--color-border)" },
+};
+
 export default function HelpDrawer({ open, onClose, onStartTour }: Props) {
   const [copied, setCopied] = useState(false);
 
@@ -134,11 +140,7 @@ export default function HelpDrawer({ open, onClose, onStartTour }: Props) {
       }
       open={open}
       onClose={onClose}
-      styles={{
-        wrapper: { width: 480 },
-        body: { padding: "20px 24px", background: "var(--color-bg)" },
-        header: { borderBottom: "1px solid var(--color-border)" },
-      }}
+      styles={DRAWER_STYLES}
     >
       <SectionCard title="Features" icon={<FileSearchOutlined />}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

@@ -110,4 +110,10 @@ body,
 #root {
   background: var(--color-bg);
   color: var(--color-text);
+  /* Lock the viewport: the desktop shell is a single 100vh Layout, no
+     document-level scrolling is ever wanted. Without this WebKit's
+     rubber-band lets the user pull the header up and over the border. */
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }

@@ -32,6 +32,12 @@ const FILE_TYPE_GROUPS = [
 
 const ALL_TYPES = FILE_TYPE_GROUPS.flatMap((g) => [...g.types]);
 
+const DRAWER_STYLES = {
+  wrapper: { width: 480 },
+  body: { padding: "20px 24px", background: "var(--color-bg)" },
+  header: { borderBottom: "1px solid var(--color-border)" },
+};
+
 interface IndexProgress {
   total: number;
   done: number;
@@ -423,11 +429,7 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
       }
       open={drawerOpen}
       onClose={onClose}
-      styles={{
-        wrapper: { width: 480 },
-        body: { padding: "20px 24px", background: "var(--color-bg)" },
-        header: { borderBottom: "1px solid var(--color-border)" },
-      }}
+      styles={DRAWER_STYLES}
     >
       {/* ── 监听文件夹 ── */}
       <div style={{
