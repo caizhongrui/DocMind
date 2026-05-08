@@ -330,9 +330,10 @@ pub struct HistoryMessage {
 pub fn ask_question(
     question: String,
     state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<AskResponse, String> {
     // Free-tier monthly quota check (no-op for Trial / Pro).
-    crate::commands::license::consume_ai_quota(&state)?;
+    crate::commands::license::consume_ai_quota(&app, &state)?;
 
     // 1. 混合检索：chunk 上限根据已加载模型的参数量自适应
     let max_chunks = {
@@ -419,7 +420,7 @@ pub fn ask_question_stream(
     app: AppHandle,
 ) -> Result<Vec<SourceRef>, String> {
     // Free-tier monthly quota check (no-op for Trial / Pro).
-    crate::commands::license::consume_ai_quota(&state)?;
+    crate::commands::license::consume_ai_quota(&app, &state)?;
 
     // 1. 混合检索（快速，同步完成）
     // 多轮对话时，将上一轮用户问题拼入检索词，保留实体/上下文信息
@@ -681,7 +682,7 @@ pub async fn ask_question_stream_api(
     app: AppHandle,
 ) -> Result<Vec<SourceRef>, String> {
     // Free-tier monthly quota check (no-op for Trial / Pro).
-    crate::commands::license::consume_ai_quota(&state)?;
+    crate::commands::license::consume_ai_quota(&app, &state)?;
 
     // 读取 API 配置
     let config = {

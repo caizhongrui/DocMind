@@ -65,6 +65,17 @@ export const useLicenseStore = create<LicenseStore>((set, get) => ({
     listen("license-updated", () => {
       get().refresh();
     });
+    // Backend pushes quota-consumed every time a Free user's AI call is
+    // accepted, with the fresh quota snapshot in the payload. Patch it
+    // straight into the existing status to avoid an extra round-trip.
+    listen<QuotaSnapshot>("quota-consumed", (ev) => {
+      const cur = get().status;
+      if (!cur) {
+        get().refresh();
+        return;
+      }
+      set({ status: { ...cur, quota: ev.payload } });
+    });
   },
 }));
 

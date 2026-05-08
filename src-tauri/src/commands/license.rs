@@ -146,8 +146,9 @@ pub fn require_pro(state: &AppState, reason: &str) -> Result<(), String> {
 
 /// Free-tier quota check. Returns Err if the user is Free and out of quota.
 /// Trial / Pro callers always pass through. The counter is incremented when
-/// the call is granted.
-pub fn consume_ai_quota(state: &AppState) -> Result<(), String> {
+/// the call is granted, and a `quota-consumed` event is emitted so the
+/// front-end status chip can refresh its `used` counter.
+pub fn consume_ai_quota(app: &AppHandle, state: &AppState) -> Result<(), String> {
     let lic = state
         .license
         .read()
@@ -158,7 +159,11 @@ pub fn consume_ai_quota(state: &AppState) -> Result<(), String> {
     }
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     match quota::try_consume(&conn) {
-        Ok(true) => Ok(()),
+        Ok(true) => {
+            let snap = quota::snapshot(&conn);
+            let _ = app.emit("quota-consumed", &snap);
+            Ok(())
+        }
         Ok(false) => Err(format!(
             "QUOTA_EXCEEDED:ai/{}/{}",
             quota::FREE_MONTHLY_LIMIT,

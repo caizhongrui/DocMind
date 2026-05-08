@@ -1,5 +1,5 @@
 use crate::{search, state::AppState};
-use tauri::State;
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub fn search_files(
@@ -8,11 +8,12 @@ pub fn search_files(
     limit: Option<usize>,
     sort_by: Option<String>,
     state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<Vec<search::SearchResult>, String> {
     let limit = limit.unwrap_or(50);
     // Semantic search counts against the same monthly AI quota as Q&A.
     if mode == "semantic" {
-        crate::commands::license::consume_ai_quota(&state)?;
+        crate::commands::license::consume_ai_quota(&app, &state)?;
     }
     let mut results = match mode.as_str() {
         "filename" => search::search_filename(&query, &state, limit),
