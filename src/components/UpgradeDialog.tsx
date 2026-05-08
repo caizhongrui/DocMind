@@ -86,7 +86,7 @@ export default function UpgradeDialog() {
         throw new Error(`服务器返回 ${resp.status}: ${text}`);
       }
       const data = (await resp.json()) as { token_json: string };
-      await invoke("install_license_token", { input: { tokenJson: data.token_json } });
+      await invoke("install_license_token", { input: { token_json: data.token_json } });
       closeUpgrade();
     } catch (e) {
       setActivationError(e instanceof Error ? e.message : String(e));
@@ -107,7 +107,7 @@ export default function UpgradeDialog() {
       } catch {
         throw new Error("不是合法的 JSON,请检查复制是否完整");
       }
-      await invoke("install_license_token", { input: { tokenJson: trimmed } });
+      await invoke("install_license_token", { input: { token_json: trimmed } });
       closeUpgrade();
     } catch (e) {
       setActivationError(e instanceof Error ? e.message : String(e));
