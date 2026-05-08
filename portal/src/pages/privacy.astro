@@ -1,0 +1,86 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout title="隐私政策" description="DocMind 隐私政策 — 我们如何处理你的数据">
+  <section class="border-b border-ink-200 bg-gradient-hero">
+    <div class="mx-auto max-w-3xl px-6 py-16 text-center">
+      <h1 class="text-4xl font-bold tracking-tight text-ink-900">隐私政策</h1>
+      <p class="mt-3 text-sm text-ink-500">最后更新:2026-05-08</p>
+    </div>
+  </section>
+
+  <section class="bg-white">
+    <div class="prose prose-sm mx-auto max-w-3xl px-6 py-16 text-ink-700">
+      <p class="text-base leading-relaxed">
+        DocMind 是本地优先的文档搜索工具。我们在产品设计时把"用户数据归用户所有"作为第一原则。
+        本政策说明 DocMind(以下简称"应用")在不同场景下会处理哪些数据。
+      </p>
+
+      <h2 class="mt-10 text-lg font-bold text-ink-900">1. 我们 <strong>不</strong> 收集的数据</h2>
+      <ul class="mt-4 space-y-2 text-sm leading-relaxed">
+        <li>· 你索引的任何文件内容</li>
+        <li>· 你的搜索查询、问答记录</li>
+        <li>· 你的文件路径、文件名、目录结构</li>
+        <li>· 你电脑的硬件信息(CPU/GPU/型号 等具体值)</li>
+        <li>· 应用使用习惯、点击埋点、Crash report 自动上传</li>
+      </ul>
+      <p class="mt-3 text-sm leading-relaxed">
+        所有以上数据保存在你的本地磁盘,DocMind 没有云端服务接收它们,也没有任何渠道上传。
+      </p>
+
+      <h2 class="mt-10 text-lg font-bold text-ink-900">2. 我们 <strong>会</strong> 在以下场景与服务器通信</h2>
+      <h3 class="mt-4 text-base font-semibold">2.1 模型与版本下载</h3>
+      <p class="mt-2 text-sm leading-relaxed">
+        首次启动会从 ModelScope(国内镜像)或 HuggingFace 下载语义模型(约 100 MB);
+        从 DocMind 自有更新服务器下载新版本应用。
+        这些请求只包含 IP 地址、版本号、平台 — 不包含任何用户内容。
+      </p>
+
+      <h3 class="mt-4 text-base font-semibold">2.2 License 激活与购买</h3>
+      <p class="mt-2 text-sm leading-relaxed">
+        购买 Pro 时,你的支付信息(姓名、付款方式)由 PayJS 处理,我们只接收支付状态与订单号,不接触你的银行卡或账户密码。
+        激活时,客户端会向 license 服务器发送你的 license key 和当前设备的硬件指纹(SHA-256 哈希值,不可还原成原始硬件信息)。
+        服务器把这两者关联起来,签发一份本地 license token。激活完成后,客户端永远不再调用服务器。
+      </p>
+
+      <h3 class="mt-4 text-base font-semibold">2.3 下载日志</h3>
+      <p class="mt-2 text-sm leading-relaxed">
+        DocMind 服务器记录每次应用下载的:时间、版本号、平台、IP、User-Agent。
+        用于反盗版、容量规划与异常检测。日志在 90 天后自动归档,不与个人身份关联。
+      </p>
+
+      <h2 class="mt-10 text-lg font-bold text-ink-900">3. 你的数据存在哪里</h2>
+      <p class="mt-3 text-sm leading-relaxed">
+        所有索引、搜索历史、对话记录、license 文件都存在你电脑的应用数据目录:
+      </p>
+      <ul class="mt-3 space-y-1 font-mono text-xs">
+        <li>macOS: ~/Library/Application Support/com.caizhongrui.docmind/</li>
+        <li>Windows: %APPDATA%\com.caizhongrui.docmind\</li>
+      </ul>
+      <p class="mt-3 text-sm leading-relaxed">
+        删除该目录即可彻底清除 DocMind 的本地数据。
+      </p>
+
+      <h2 class="mt-10 text-lg font-bold text-ink-900">4. AI 推理</h2>
+      <p class="mt-3 text-sm leading-relaxed">
+        DocMind 使用本地 LLM(llama.cpp 加载 GGUF 模型)与本地 Embedding 模型(ONNX Runtime)。
+        所有推理在你的 CPU/GPU 上完成,不调用 OpenAI / Claude / 任何第三方 AI API。
+        如果你在设置中手动启用了"API 模式"接入 OpenAI 兼容接口,则你的查询会按你配置的端点发送 — 这是你主动选择,DocMind 默认不启用。
+      </p>
+
+      <h2 class="mt-10 text-lg font-bold text-ink-900">5. 你的权利</h2>
+      <ul class="mt-4 space-y-2 text-sm leading-relaxed">
+        <li>· 随时卸载应用并删除本地数据,无需通知我们</li>
+        <li>· 通过邮件向我们查询关于你的 license 与订单记录</li>
+        <li>· 要求我们删除你的订单与 license 数据(license 同步失效)</li>
+      </ul>
+
+      <h2 class="mt-10 text-lg font-bold text-ink-900">6. 联系我们</h2>
+      <p class="mt-3 text-sm leading-relaxed">
+        关于隐私的任何问题,请发送邮件至 <a class="text-primary-600 hover:underline" href="mailto:qdzy_cai@163.com">qdzy_cai@163.com</a>。
+        我们不会以任何形式分享或转售这些咨询邮件。
+      </p>
+    </div>
+  </section>
+</Layout>

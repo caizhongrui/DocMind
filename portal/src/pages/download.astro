@@ -1,0 +1,135 @@
+---
+import Layout from "../layouts/Layout.astro";
+
+const platforms = [
+  {
+    name: "macOS",
+    arch: "Apple Silicon · macOS 12+",
+    file: "DocMind_aarch64.dmg",
+    url: "https://api.docmind.app/releases/free/darwin-aarch64/DocMind_aarch64.dmg",
+    size: "~85 MB",
+    icon: "M19 11.2c0-2.5-2.1-4.5-4.7-4.5-1.4 0-2.6.6-3.5 1.5-.9-.9-2.1-1.5-3.5-1.5C4.6 6.7 2.5 8.7 2.5 11.2c0 6.8 8.5 11.3 8.5 11.3s8.5-4.5 8.5-11.3z",
+    description: "M1/M2/M3/M4 系列 Mac",
+  },
+  {
+    name: "macOS",
+    arch: "Intel · macOS 12+",
+    file: "DocMind_x64.dmg",
+    url: "https://api.docmind.app/releases/free/darwin-x86_64/DocMind_x64.dmg",
+    size: "~92 MB",
+    icon: "M19 11.2c0-2.5-2.1-4.5-4.7-4.5-1.4 0-2.6.6-3.5 1.5-.9-.9-2.1-1.5-3.5-1.5C4.6 6.7 2.5 8.7 2.5 11.2c0 6.8 8.5 11.3 8.5 11.3s8.5-4.5 8.5-11.3z",
+    description: "Intel 架构 Mac",
+  },
+  {
+    name: "Windows",
+    arch: "x64 · Windows 10/11",
+    file: "DocMind_x64.msi",
+    url: "https://api.docmind.app/releases/free/windows-x86_64/DocMind_x64.msi",
+    size: "~78 MB",
+    icon: "M3 5h8v8H3zM13 5h8v8h-8zM3 11h8v8H3zM13 11h8v8h-8z",
+    description: "64 位 Windows 安装包",
+  },
+];
+---
+
+<Layout
+  title="下载"
+  description="DocMind 提供 macOS Apple Silicon / Intel 与 Windows 安装包,免费可用。"
+>
+  <section class="border-b border-ink-200 bg-gradient-hero">
+    <div class="mx-auto max-w-6xl px-6 py-20 text-center">
+      <h1 class="text-4xl font-bold tracking-tight text-ink-900 md:text-5xl">下载 DocMind</h1>
+      <p class="mx-auto mt-4 max-w-2xl text-lg text-ink-600">
+        免费版完整可用,首次启动自动开始 5 天 Pro 试用 — 无需信用卡。
+      </p>
+    </div>
+  </section>
+
+  <section class="bg-white">
+    <div class="mx-auto max-w-5xl px-6 py-16">
+      <div class="grid gap-5 md:grid-cols-3">
+        {platforms.map((p) => (
+          <div class="rounded-2xl border border-ink-200 bg-white p-6 transition hover:border-primary-300 hover:shadow-lg">
+            <div class="flex items-center gap-3">
+              <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-50 text-primary-600">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+                  <path d={p.icon} />
+                </svg>
+              </div>
+              <div>
+                <h3 class="text-base font-semibold text-ink-900">{p.name}</h3>
+                <p class="text-xs text-ink-500">{p.arch}</p>
+              </div>
+            </div>
+            <p class="mt-4 text-sm text-ink-600">{p.description}</p>
+            <a
+              href={p.url}
+              class="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-ink-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-ink-800"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+              </svg>
+              下载
+            </a>
+            <div class="mt-3 flex items-center justify-between font-mono text-xs text-ink-400">
+              <span>{p.file}</span>
+              <span>{p.size}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="border-t border-ink-200 bg-ink-50">
+    <div class="mx-auto max-w-4xl px-6 py-16">
+      <h2 class="text-2xl font-bold tracking-tight text-ink-900">系统要求</h2>
+      <div class="mt-6 grid gap-6 md:grid-cols-2">
+        <div class="rounded-xl border border-ink-200 bg-white p-6">
+          <h3 class="text-sm font-semibold text-ink-900">最低配置</h3>
+          <ul class="mt-3 space-y-2 text-sm text-ink-700">
+            <li class="font-mono">· macOS 12+ / Windows 10 64 位</li>
+            <li class="font-mono">· 4GB 内存 + 2GB 磁盘空间</li>
+            <li class="font-mono">· 仅限 0.6B 模型</li>
+          </ul>
+        </div>
+        <div class="rounded-xl border border-ink-200 bg-white p-6">
+          <h3 class="text-sm font-semibold text-ink-900">推荐配置</h3>
+          <ul class="mt-3 space-y-2 text-sm text-ink-700">
+            <li class="font-mono">· Apple Silicon / 现代 x86_64</li>
+            <li class="font-mono">· 8GB+ 内存 + SSD 5GB+</li>
+            <li class="font-mono">· 1.7B/4B 模型流畅运行</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="border-t border-ink-200 bg-white">
+    <div class="mx-auto max-w-3xl px-6 py-16">
+      <h2 class="text-2xl font-bold tracking-tight text-ink-900">安装步骤</h2>
+      <ol class="mt-6 space-y-5 text-sm leading-relaxed text-ink-700">
+        <li class="flex gap-4">
+          <span class="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary-100 font-mono text-xs font-semibold text-primary-700">1</span>
+          <span>下载对应平台的安装包,按系统提示完成安装。</span>
+        </li>
+        <li class="flex gap-4">
+          <span class="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary-100 font-mono text-xs font-semibold text-primary-700">2</span>
+          <span>首次启动会引导你下载语义模型(约 100 MB),从模型完成开始 5 天 Pro 试用自动开启。</span>
+        </li>
+        <li class="flex gap-4">
+          <span class="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary-100 font-mono text-xs font-semibold text-primary-700">3</span>
+          <span>在「设置」中添加要索引的文件夹,等待初始扫描完成,即可开始搜索。</span>
+        </li>
+        <li class="flex gap-4">
+          <span class="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary-100 font-mono text-xs font-semibold text-primary-700">4</span>
+          <span>试用期内或购买 Pro 后,可在 AI 问答面板下载更大的 LLM 模型(1.7B 或 4B)以获得更高问答质量。</span>
+        </li>
+      </ol>
+      <div class="mt-10 rounded-xl border border-ink-200 bg-ink-50 p-5 text-xs text-ink-600">
+        <strong class="text-ink-900">macOS 用户首次打开提示"未识别的开发者"?</strong>
+        DocMind 暂未做 Apple 开发者证书签名(¥99/年的成本暂无法摊销)。在 系统设置 → 隐私与安全性 → 仍要打开 即可。
+      </div>
+    </div>
+  </section>
+</Layout>

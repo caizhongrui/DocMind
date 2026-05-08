@@ -1,0 +1,54 @@
+---
+import Layout from "../layouts/Layout.astro";
+const email = "qdzy_cai@163.com";
+---
+
+<Layout title="联系我们" description="DocMind 联系方式 — 邮件支持、商务合作、问题反馈。">
+  <section class="border-b border-ink-200 bg-gradient-hero">
+    <div class="mx-auto max-w-3xl px-6 py-20 text-center">
+      <h1 class="text-4xl font-bold tracking-tight text-ink-900 md:text-5xl">联系我们</h1>
+      <p class="mt-4 text-base text-ink-600">
+        DocMind 是独立开发者作品,所有反馈都会被认真阅读。
+      </p>
+    </div>
+  </section>
+
+  <section class="bg-white">
+    <div class="mx-auto max-w-2xl px-6 py-16">
+      <div class="rounded-2xl border border-ink-200 bg-white p-8 text-center">
+        <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary-50 text-primary-600">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-6 w-6">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2zM22 6l-10 7L2 6" />
+          </svg>
+        </div>
+        <p class="mt-5 text-sm text-ink-600">通过邮件直接联系开发者</p>
+        <a
+          class="mt-3 block break-all font-mono text-lg font-semibold text-primary-700 hover:underline"
+          href={`mailto:${email}`}
+        >
+          {email}
+        </a>
+      </div>
+
+      <div class="mt-10 grid gap-4 md:grid-cols-3">
+        {[
+          { title: "购买与激活", desc: "license 问题、订单查询、激活失败" },
+          { title: "Bug 反馈", desc: "使用过程中遇到的问题、异常或崩溃" },
+          { title: "功能建议", desc: "想要的功能、希望支持的格式或场景" },
+          { title: "商业合作", desc: "产品授权、企业版、渠道合作" },
+          { title: "项目定制", desc: "定制化开发、企业知识库搭建" },
+          { title: "媒体采访", desc: "产品介绍、技术访谈" },
+        ].map((c) => (
+          <div class="rounded-xl border border-ink-200 bg-ink-50 p-4">
+            <h3 class="text-sm font-semibold text-ink-900">{c.title}</h3>
+            <p class="mt-1 text-xs leading-relaxed text-ink-600">{c.desc}</p>
+          </div>
+        ))}
+      </div>
+
+      <p class="mt-10 text-center text-xs text-ink-400">
+        我们一般在 1-3 个工作日内回复。请尽量在邮件中描述你使用的版本、平台和复现步骤。
+      </p>
+    </div>
+  </section>
+</Layout>

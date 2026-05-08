@@ -1,0 +1,52 @@
+---
+import Layout from "./Layout.astro";
+import DocsSidebar from "../components/DocsSidebar.astro";
+
+interface Props {
+  title: string;
+  description?: string;
+}
+const { title, description } = Astro.props;
+---
+
+<Layout title={title} description={description}>
+  <div class="mx-auto max-w-6xl px-6 py-12">
+    <div class="flex flex-col gap-12 md:flex-row">
+      <DocsSidebar />
+      <article class="prose prose-sm flex-1 max-w-none text-ink-700">
+        <slot />
+      </article>
+    </div>
+  </div>
+</Layout>
+
+<style is:global>
+  .prose h1 { font-size: 30px; font-weight: 700; color: #0f172a; margin: 0 0 12px; line-height: 1.2; }
+  .prose h2 { font-size: 20px; font-weight: 600; color: #0f172a; margin: 32px 0 12px; }
+  .prose h3 { font-size: 16px; font-weight: 600; color: #0f172a; margin: 24px 0 8px; }
+  .prose p { font-size: 15px; line-height: 1.8; margin: 12px 0; }
+  .prose ul, .prose ol { padding-left: 24px; margin: 12px 0; }
+  .prose ul { list-style: disc; }
+  .prose ol { list-style: decimal; }
+  .prose li { font-size: 15px; line-height: 1.8; margin: 4px 0; }
+  .prose strong { color: #0f172a; }
+  .prose code { background: #f1f5f9; padding: 1px 6px; border-radius: 4px; font-size: 13px; font-family: var(--font-mono); color: #1e40af; }
+  .prose pre { background: #0f172a; color: #e2e8f0; padding: 14px 18px; border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.6; margin: 16px 0; }
+  .prose pre code { background: transparent; color: inherit; padding: 0; }
+  .prose a { color: #2563eb; text-decoration: none; }
+  .prose a:hover { text-decoration: underline; }
+  .prose blockquote { border-left: 3px solid #cbd5e1; padding: 4px 16px; color: #64748b; margin: 16px 0; }
+  .prose hr { border: none; border-top: 1px solid #e2e8f0; margin: 32px 0; }
+  .prose table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0; }
+  .prose th, .prose td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+  .prose th { background: #f8fafc; font-weight: 600; color: #0f172a; }
+  .callout {
+    border-left: 3px solid #3b82f6;
+    background: #eff6ff;
+    padding: 12px 16px;
+    border-radius: 0 8px 8px 0;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  .callout p { margin: 4px 0; font-size: 14px; }
+</style>

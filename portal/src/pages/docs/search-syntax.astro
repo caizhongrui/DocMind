@@ -1,0 +1,57 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout title="搜索语法" description="DocMind 的全文搜索语法详解">
+  <h1>搜索语法</h1>
+  <p>DocMind 的全文搜索基于 Tantivy(Rust 版 Lucene),支持类似 Google 风格的查询语法。本文列出所有可用语法。</p>
+
+  <h2>基础查询</h2>
+  <table>
+    <thead>
+      <tr><th>查询</th><th>含义</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>合同</code></td><td>包含"合同"的文档</td></tr>
+      <tr><td><code>合同 违约</code></td><td>包含"合同"或"违约"中任意一个的文档(默认 OR)</td></tr>
+      <tr><td><code>合同 AND 违约</code></td><td>同时包含"合同"和"违约"</td></tr>
+      <tr><td><code>合同 OR 协议</code></td><td>包含"合同"或"协议"中至少一个</td></tr>
+      <tr><td><code>合同 NOT 终止</code></td><td>包含"合同"但不包含"终止"</td></tr>
+    </tbody>
+  </table>
+
+  <h2>精确短语</h2>
+  <p>用双引号把短语括起来,只匹配完整连续的字符串:</p>
+  <pre><code>"违约金条款"</code></pre>
+  <p>不加引号时,各词独立匹配,可能返回包含"违约"和"金"但不在一起的文档。</p>
+
+  <h2>组合查询</h2>
+  <p>用括号控制优先级:</p>
+  <pre><code>(合同 OR 协议) AND 违约 NOT 终止</code></pre>
+  <p>找出"含合同或协议"且"含违约"但"不含终止"的文档。</p>
+
+  <h2>中英文混合</h2>
+  <p>关键词可以中英混合,DocMind 会自动按中文分词 + 英文 stemming 处理:</p>
+  <pre><code>API 文档 OR API spec</code></pre>
+
+  <h2>文件类型筛选</h2>
+  <p>搜索结果出现后,顶部的文件类型 chips(PDF / Word / Excel / 文本)可点击多选筛选。也可在「设置」中关闭某些类型不进入索引。</p>
+
+  <h2>语义搜索的不同</h2>
+  <p>切换到「语义」模式时,上述语法 <strong>不生效</strong> — 语义搜索把整个查询当作自然语言理解。例如:</p>
+  <ul>
+    <li><code>讲到费用结算的部分</code> — 会找到含"费用"、"结算"、"开票"等相关概念的文档</li>
+    <li><code>关于离职流程的规定</code> — 即使原文没有"离职"这个词,只要意思接近也会被找到</li>
+  </ul>
+  <p>语义搜索更适合"我大概记得是什么意思但忘了原文"的场景。</p>
+
+  <h2>键盘快捷键</h2>
+  <table>
+    <tbody>
+      <tr><td><code>⌘K</code> / <code>Ctrl+K</code></td><td>聚焦搜索框</td></tr>
+      <tr><td><code>↑</code> / <code>↓</code></td><td>列表导航</td></tr>
+      <tr><td><code>↵</code></td><td>打开当前选中文件</td></tr>
+      <tr><td><code>⌘C</code> / <code>Ctrl+C</code></td><td>选中文件名后复制</td></tr>
+    </tbody>
+  </table>
+</DocsLayout>

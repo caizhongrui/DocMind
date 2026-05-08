@@ -1,0 +1,29 @@
+---
+const path = Astro.url.pathname;
+const links = [
+  { href: "/docs", label: "文档首页" },
+  { href: "/docs/getting-started", label: "快速入门" },
+  { href: "/docs/search-syntax", label: "搜索语法" },
+  { href: "/docs/ai-qa", label: "AI 问答指南" },
+  { href: "/docs/faq", label: "常见问题" },
+];
+---
+
+<aside class="md:w-56 md:flex-shrink-0">
+  <nav class="space-y-1">
+    <h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-500">使用文档</h3>
+    {links.map((l) => (
+      <a
+        href={l.href}
+        class:list={[
+          "block rounded-md px-3 py-1.5 text-sm transition",
+          path === l.href
+            ? "bg-primary-50 font-medium text-primary-700"
+            : "text-ink-600 hover:bg-ink-50 hover:text-ink-900",
+        ]}
+      >
+        {l.label}
+      </a>
+    ))}
+  </nav>
+</aside>

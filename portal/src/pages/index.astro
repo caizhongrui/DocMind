@@ -1,0 +1,269 @@
+---
+import Layout from "../layouts/Layout.astro";
+
+const features = [
+  {
+    title: "全文搜索",
+    desc: "毫秒级返回 PDF / Word / Excel / PPT 内容,支持中英文混合关键词与 AND/OR/NOT 高级语法。",
+    icon: "M21 21l-4.35-4.35M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16Z",
+  },
+  {
+    title: "AI 语义搜索",
+    desc: "用自然语言描述要找的内容,本地 Embedding 模型理解含义,无需精确关键词。",
+    icon: "M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83",
+  },
+  {
+    title: "文档问答",
+    desc: "直接向 AI 提问,自动检索文档作为上下文给出回答,每个答案都附带可点击的来源。",
+    icon: "M21 11.5a8.38 8.38 0 0 1-9 8.5 8.5 8.5 0 0 1-7.6-4.7L3 21l1.7-1.4A8.5 8.5 0 0 1 12 3a8.38 8.38 0 0 1 9 8.5z",
+  },
+  {
+    title: "完全本地运行",
+    desc: "所有数据、所有索引、所有推理都在你的电脑上。零云端依赖,安心面对敏感文档。",
+    icon: "M12 1l3 6 6 1-4 5 1 7-6-3-6 3 1-7-4-5 6-1z",
+  },
+  {
+    title: "OCR 扫描件支持",
+    desc: "图片、扫描 PDF 通过系统原生 OCR 提取文字,扫描件也能被搜到。",
+    icon: "M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h6v6h-6z",
+  },
+  {
+    title: "毫秒级实时索引",
+    desc: "新加文件 / 修改 / 删除全部自动同步,搜索结果永远最新。",
+    icon: "M12 6v6l4 2m6-2a10 10 0 1 1-20 0 10 10 0 0 1 20 0Z",
+  },
+];
+---
+
+<Layout
+  title="DocMind"
+  description="本地优先的文档智能搜索 — 全文搜索 + AI 语义检索 + 文档问答,所有数据保存在本机,完全离线运行。"
+>
+  <!-- Hero -->
+  <section class="relative overflow-hidden bg-gradient-hero">
+    <div class="mx-auto max-w-6xl px-6 pb-20 pt-20 md:pt-28">
+      <div class="grid items-center gap-14 md:grid-cols-2">
+        <div>
+          <div
+            class="mb-5 inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-medium text-primary-700"
+          >
+            <span class="h-1.5 w-1.5 rounded-full bg-primary-500"></span>
+            v0.2 现已上线
+          </div>
+          <h1
+            class="text-4xl font-bold leading-tight tracking-tight text-ink-900 md:text-5xl md:leading-[1.1]"
+          >
+            把所有文档<br />
+            装进一个<span class="bg-gradient-to-r from-primary-600 to-primary-400 bg-clip-text text-transparent">本地搜索引擎</span>
+          </h1>
+          <p class="mt-6 text-lg leading-relaxed text-ink-600">
+            DocMind 让你在本机上对 PDF、Word、Excel、PPT、扫描件做全文 + 语义双引擎搜索,
+            还能直接向 AI 提问,所有处理离线完成,数据永不出本机。
+          </p>
+          <div class="mt-8 flex flex-wrap gap-3">
+            <a
+              href="/download"
+              class="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-5 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-primary-700"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+              </svg>
+              免费下载
+            </a>
+            <a
+              href="/pricing"
+              class="inline-flex items-center gap-2 rounded-lg border border-ink-200 bg-white px-5 py-3 text-sm font-medium text-ink-900 transition hover:border-ink-300"
+            >
+              查看 Pro 价格
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+                <path d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
+            </a>
+          </div>
+          <div class="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-xs text-ink-500">
+            <span class="flex items-center gap-1.5">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" class="h-3.5 w-3.5"><path d="m5 13 4 4L19 7"/></svg>
+              支持 macOS / Windows
+            </span>
+            <span class="flex items-center gap-1.5">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" class="h-3.5 w-3.5"><path d="m5 13 4 4L19 7"/></svg>
+              零账号、零追踪
+            </span>
+            <span class="flex items-center gap-1.5">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" class="h-3.5 w-3.5"><path d="m5 13 4 4L19 7"/></svg>
+              5 天 Pro 免费试用
+            </span>
+          </div>
+        </div>
+        <div class="screenshot-frame">
+          <div class="traffic-lights">
+            <span class="tl-red"></span>
+            <span class="tl-yellow"></span>
+            <span class="tl-green"></span>
+          </div>
+          <div class="bg-[#0c0d10] px-5 py-4 font-mono text-xs text-[#e6e8eb]">
+            <div class="mb-3 flex items-center gap-2">
+              <div class="flex gap-1">
+                <span class="rounded bg-[#1c1f26] px-2 py-0.5 text-[10px] text-white">全文</span>
+                <span class="rounded px-2 py-0.5 text-[10px] text-[#8b8f99]">文件名</span>
+                <span class="rounded px-2 py-0.5 text-[10px] text-[#8b8f99]">语义</span>
+              </div>
+              <div class="ml-2 flex-1 text-[11px]">合同 AND 违约</div>
+              <span class="rounded border border-[#23262d] bg-[#1c1f26] px-1.5 py-0.5 text-[10px]">⌘K</span>
+            </div>
+            <div class="space-y-1.5 text-[11px]">
+              <div class="rounded px-2 py-1.5" style="box-shadow: inset 2px 0 0 0 #3b82f6; background: #1c1f26;">
+                <div class="flex justify-between"><span class="text-white">2024 年度技术服务合同.pdf</span><span class="text-[10px] text-[#5b5f68]">PDF</span></div>
+                <div class="text-[10px] text-[#8b8f99]">/Users/me/Documents/contracts/...</div>
+              </div>
+              <div class="rounded px-2 py-1.5">
+                <div class="flex justify-between"><span class="text-[#e6e8eb]">合作协议-V3-签署版.docx</span><span class="text-[10px] text-[#5b5f68]">DOCX</span></div>
+                <div class="text-[10px] text-[#8b8f99]">/Users/me/Documents/legal/...</div>
+              </div>
+              <div class="rounded px-2 py-1.5">
+                <div class="flex justify-between"><span class="text-[#e6e8eb]">违约金条款解读笔记.md</span><span class="text-[10px] text-[#5b5f68]">MD</span></div>
+                <div class="text-[10px] text-[#8b8f99]">/Users/me/Notes/2025/...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features grid -->
+  <section class="border-t border-ink-200 bg-white">
+    <div class="mx-auto max-w-6xl px-6 py-20">
+      <div class="mb-12 max-w-2xl">
+        <span class="mb-3 inline-block text-xs font-semibold uppercase tracking-wider text-primary-600">
+          为什么选择 DocMind
+        </span>
+        <h2 class="text-3xl font-bold tracking-tight text-ink-900 md:text-4xl">
+          一个工具,三种搜索能力
+        </h2>
+        <p class="mt-4 text-lg text-ink-600">
+          告别在 Spotlight、Everything、Google Drive 间切换 — DocMind 把传统全文索引和现代 AI 语义理解整合在一个本地应用里。
+        </p>
+      </div>
+      <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {features.map((f) => (
+          <div class="rounded-xl border border-ink-200 bg-white p-6 transition hover:border-primary-200 hover:shadow-lg hover:shadow-primary-50">
+            <div class="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-lg bg-primary-50 text-primary-600">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5">
+                <path d={f.icon} />
+              </svg>
+            </div>
+            <h3 class="text-base font-semibold text-ink-900">{f.title}</h3>
+            <p class="mt-2 text-sm leading-relaxed text-ink-600">{f.desc}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- Privacy CTA strip -->
+  <section class="bg-ink-900">
+    <div class="mx-auto max-w-6xl px-6 py-16">
+      <div class="grid items-center gap-10 md:grid-cols-3">
+        <div>
+          <div class="mb-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-white/70">
+            隐私优先
+          </div>
+          <h2 class="text-2xl font-bold leading-tight text-white md:text-3xl">
+            你的文档,只属于你的电脑
+          </h2>
+        </div>
+        <div class="md:col-span-2">
+          <p class="text-base leading-relaxed text-ink-300">
+            DocMind 不上传任何文档内容、不收集使用习惯、不调用云端 API。AI 模型在本地通过 llama.cpp 运行,
+            搜索引擎是 Rust 编写的 Tantivy。从你的合同到你的科研笔记,什么都不会离开本机。
+          </p>
+          <div class="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-ink-400">
+            <span class="font-mono">no telemetry</span>
+            <span class="font-mono">no account</span>
+            <span class="font-mono">no cloud sync</span>
+            <span class="font-mono">no remote API calls</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing summary -->
+  <section class="border-t border-ink-200 bg-white">
+    <div class="mx-auto max-w-6xl px-6 py-20">
+      <div class="mb-10 text-center">
+        <h2 class="text-3xl font-bold tracking-tight text-ink-900 md:text-4xl">简单的定价</h2>
+        <p class="mt-3 text-base text-ink-600">免费版完整可用,Pro 解锁全部 AI 能力</p>
+      </div>
+      <div class="mx-auto grid max-w-3xl gap-6 md:grid-cols-2">
+        <div class="rounded-2xl border border-ink-200 bg-white p-7">
+          <h3 class="text-lg font-semibold text-ink-900">Free</h3>
+          <div class="mt-3 text-3xl font-bold text-ink-900">¥0</div>
+          <div class="mt-1 text-sm text-ink-500">永久免费</div>
+          <ul class="mt-6 space-y-2 text-sm text-ink-700">
+            <li class="flex gap-2"><span class="text-primary-500">✓</span>全文 + 文件名搜索</li>
+            <li class="flex gap-2"><span class="text-primary-500">✓</span>每月 30 次 AI 问答</li>
+            <li class="flex gap-2"><span class="text-primary-500">✓</span>0.6B 轻量本地模型</li>
+            <li class="flex gap-2 text-ink-400"><span>✕</span>OCR / 扫描件</li>
+            <li class="flex gap-2 text-ink-400"><span>✕</span>批量摘要 / 自定义模型</li>
+          </ul>
+          <a href="/download" class="mt-7 inline-flex w-full items-center justify-center rounded-lg border border-ink-200 px-4 py-2.5 text-sm font-medium text-ink-900 transition hover:border-ink-300">
+            免费下载
+          </a>
+        </div>
+        <div class="relative rounded-2xl border-2 border-primary-500 bg-gradient-to-br from-white to-primary-50/40 p-7">
+          <div class="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-primary-600 px-3 py-1 text-xs font-semibold text-white">
+            推荐
+          </div>
+          <h3 class="text-lg font-semibold text-ink-900">Pro</h3>
+          <div class="mt-3 flex items-baseline gap-2">
+            <div class="text-3xl font-bold text-ink-900">¥20</div>
+            <div class="text-sm text-ink-500">终身买断</div>
+          </div>
+          <div class="mt-1 text-sm text-primary-700">5 天免费试用,无需信用卡</div>
+          <ul class="mt-6 space-y-2 text-sm text-ink-700">
+            <li class="flex gap-2"><span class="text-primary-500">✓</span>无限 AI 问答 / 语义搜索</li>
+            <li class="flex gap-2"><span class="text-primary-500">✓</span>全部模型档位 + 自定义 GGUF</li>
+            <li class="flex gap-2"><span class="text-primary-500">✓</span>OCR 索引扫描件</li>
+            <li class="flex gap-2"><span class="text-primary-500">✓</span>批量摘要 / 对话导出</li>
+            <li class="flex gap-2"><span class="text-primary-500">✓</span>终身免费更新</li>
+          </ul>
+          <a
+            href="https://api.docmind.app/payment/checkout?plan=lifetime"
+            class="mt-7 inline-flex w-full items-center justify-center rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary-700"
+          >
+            立即购买
+          </a>
+        </div>
+      </div>
+      <p class="mx-auto mt-8 max-w-2xl text-center text-xs text-ink-500">
+        ⚠️ Pro 授权绑定到一台设备,购买后无法转移。请在常用设备上完成激活。
+      </p>
+    </div>
+  </section>
+
+  <!-- Final CTA -->
+  <section class="bg-gradient-to-br from-primary-600 to-primary-700">
+    <div class="mx-auto max-w-6xl px-6 py-20 text-center">
+      <h2 class="text-3xl font-bold tracking-tight text-white md:text-4xl">
+        现在开始,把文档库变成你的智能助手
+      </h2>
+      <p class="mt-4 text-lg text-primary-100">5 分钟内完成索引 · 永远在你的电脑上 · 一次买断 ¥20</p>
+      <div class="mt-8 flex justify-center gap-3">
+        <a
+          href="/download"
+          class="inline-flex items-center gap-2 rounded-lg bg-white px-6 py-3 text-sm font-semibold text-primary-700 shadow-sm transition hover:bg-primary-50"
+        >
+          免费下载
+        </a>
+        <a
+          href="/docs/getting-started"
+          class="inline-flex items-center gap-2 rounded-lg border border-white/30 bg-white/10 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/20"
+        >
+          阅读文档
+        </a>
+      </div>
+    </div>
+  </section>
+</Layout>

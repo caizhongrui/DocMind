@@ -1,0 +1,100 @@
+---
+import Layout from "../layouts/Layout.astro";
+
+// At build time we'd fetch from api.docmind.app/api/v1/releases/public.
+// For the first build the server might not exist yet, so we ship a fallback
+// list and show that. The fetch is wrapped in a try/catch.
+let releases: Array<{ version: string; published_at: string; notes: string }> = [
+  {
+    version: "0.2.0",
+    published_at: "2026-05-08T00:00:00Z",
+    notes:
+      "**新增**\n- 付费功能门控:OCR、批量摘要、自定义 GGUF、4B 模型仅 Pro 可用\n- 5 天免费试用机制\n- License 激活流程(硬件指纹绑定)\n\n**改进**\n- 整体 UI 改为 Raycast 风(双主题)\n- 历史记录单击即选中\n- 切换搜索模式自动重搜",
+  },
+  {
+    version: "0.1.0",
+    published_at: "2026-04-15T00:00:00Z",
+    notes:
+      "首个公开版本。支持全文搜索、AI 语义、文档问答,完整本地运行。",
+  },
+];
+
+try {
+  const r = await fetch("https://api.docmind.app/api/v1/releases/public");
+  if (r.ok) {
+    const fetched = (await r.json()) as typeof releases;
+    if (Array.isArray(fetched) && fetched.length > 0) {
+      releases = fetched;
+    }
+  }
+} catch {
+  // network unavailable at build time — keep fallback
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Tiny markdown-ish renderer for **bold** and `code` and bullet lists.
+function tinyMd(src: string): string {
+  return src
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("- ")) {
+        return `<li>${render(trimmed.slice(2))}</li>`;
+      }
+      if (/^\*\*[^*]+\*\*$/.test(trimmed)) {
+        return `<h4>${trimmed.replace(/\*\*/g, "")}</h4>`;
+      }
+      if (trimmed === "") return "";
+      return `<p>${render(trimmed)}</p>`;
+    })
+    .join("\n")
+    .replace(/(<li>.*?<\/li>(\n)?)+/gs, (m) => `<ul>${m}</ul>`);
+}
+
+function render(s: string): string {
+  return s
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+}
+---
+
+<Layout title="更新日志" description="DocMind 历史版本与更新内容">
+  <section class="border-b border-ink-200 bg-gradient-hero">
+    <div class="mx-auto max-w-4xl px-6 py-20 text-center">
+      <h1 class="text-4xl font-bold tracking-tight text-ink-900 md:text-5xl">更新日志</h1>
+      <p class="mt-4 text-base text-ink-600">所有版本与重要变更</p>
+    </div>
+  </section>
+
+  <section class="bg-white">
+    <div class="mx-auto max-w-3xl px-6 py-16">
+      <div class="space-y-12">
+        {releases.map((r, idx) => (
+          <article class="border-l-2 border-ink-200 pl-6">
+            <div class="flex items-center gap-3">
+              <span class="font-mono text-2xl font-bold text-ink-900">v{r.version}</span>
+              <span class="font-mono text-xs text-ink-400">{formatDate(r.published_at)}</span>
+              {idx === 0 && (
+                <span class="rounded-full bg-primary-100 px-2 py-0.5 text-xs font-medium text-primary-700">最新</span>
+              )}
+            </div>
+            <div class="release-notes prose prose-sm mt-4 max-w-none text-ink-700" set:html={tinyMd(r.notes)} />
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+</Layout>
+
+<style>
+  .release-notes h4 { font-size: 13px; font-weight: 600; color: #0f172a; margin: 12px 0 6px; }
+  .release-notes ul { list-style: disc; padding-left: 20px; }
+  .release-notes li { font-size: 14px; line-height: 1.7; margin: 4px 0; }
+  .release-notes p { font-size: 14px; line-height: 1.7; margin: 6px 0; }
+  .release-notes code { background: #f1f5f9; padding: 1px 5px; border-radius: 3px; font-size: 12px; font-family: var(--font-mono); }
+</style>

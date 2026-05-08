@@ -1,0 +1,59 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout title="快速入门" description="5 分钟跑通 DocMind">
+  <h1>快速入门</h1>
+  <p>这篇文档帮你在 5 分钟内跑通 DocMind 的核心流程:下载、加文件夹、第一次搜索、问 AI 问题。</p>
+
+  <h2>1. 下载与安装</h2>
+  <p>前往 <a href="/download">下载页</a> 选择你的平台:</p>
+  <ul>
+    <li><strong>macOS Apple Silicon</strong>(M1/M2/M3/M4)</li>
+    <li><strong>macOS Intel</strong></li>
+    <li><strong>Windows x64</strong></li>
+  </ul>
+  <p>下载后双击安装,与普通桌面应用无异。macOS 用户首次打开如遇"无法验证开发者",在「系统设置 → 隐私与安全性」点击"仍要打开"即可。</p>
+
+  <h2>2. 首次启动</h2>
+  <p>第一次启动会引导你下载语义模型(约 100 MB),从这一步开始 <strong>5 天 Pro 试用自动开启</strong> — 你可以体验全部功能,无需提供信用卡或邮箱。</p>
+  <div class="callout">
+    <p><strong>提示</strong>:即使不下载语义模型,DocMind 的全文搜索功能依然可用。但要使用 AI 问答和语义搜索,必须下载这个模型。</p>
+  </div>
+
+  <h2>3. 添加要索引的文件夹</h2>
+  <ol>
+    <li>点击右上角的 <code>⚙️ 设置</code> 按钮</li>
+    <li>在「监听文件夹」分组下点击「添加文件夹」</li>
+    <li>选择你的工作目录(比如 <code>~/Documents</code> 或某个项目目录)</li>
+    <li>等待初始扫描完成 — 1000 个文件大约需要 10-30 秒</li>
+  </ol>
+  <div class="callout">
+    <p>支持多个文件夹,DocMind 会自动检测文件变更并实时更新索引。无需手动刷新。</p>
+  </div>
+
+  <h2>4. 开始搜索</h2>
+  <p>顶部搜索栏支持三种模式:</p>
+  <ul>
+    <li><strong>全文</strong>(默认):关键词匹配,毫秒级返回</li>
+    <li><strong>文件名</strong>:只匹配文件名,适合记得文件名时</li>
+    <li><strong>语义</strong>:用自然语言描述,AI 理解含义</li>
+  </ul>
+  <p>使用 <code>⌘K</code>(macOS)或 <code>Ctrl+K</code>(Windows)随时聚焦搜索框。</p>
+
+  <h2>5. 向 AI 提问</h2>
+  <p>点击右上角的 <code>💬 文档问答</code>:</p>
+  <ol>
+    <li>第一次使用会让你选择对话模型,推荐 <strong>1.7B</strong> 档(约 1.3 GB,速度与质量最均衡)</li>
+    <li>下载完成后输入你的问题,例如:"上个季度报告的核心数据有哪些"</li>
+    <li>AI 会从你的文档中检索相关片段,然后给出答案,每个答案都附带可点击的文件来源</li>
+  </ol>
+
+  <h2>6. 下一步</h2>
+  <p>了解更多:</p>
+  <ul>
+    <li><a href="/docs/search-syntax">搜索语法</a> — AND/OR/NOT 等高级查询</li>
+    <li><a href="/docs/ai-qa">AI 问答指南</a> — 如何提出好问题</li>
+    <li><a href="/docs/faq">常见问题</a> — 卡顿、模型选择、隐私等高频问题</li>
+  </ul>
+</DocsLayout>

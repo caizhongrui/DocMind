@@ -1,0 +1,71 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout title="AI 问答指南" description="如何用好 DocMind 的文档问答功能">
+  <h1>AI 问答指南</h1>
+  <p>本文介绍如何用 DocMind 的 AI 问答得到高质量答案,包括模型档位选择、提问技巧、引用源解读和性能调优。</p>
+
+  <h2>模型档位选择</h2>
+  <table>
+    <thead>
+      <tr><th>档位</th><th>大小</th><th>速度</th><th>问答质量</th><th>适合谁</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>0.6B</td><td>~600 MB</td><td>极快</td><td>基础</td><td>4-8GB 内存的老设备</td></tr>
+      <tr><td><strong>1.7B</strong>(推荐)</td><td>~1.3 GB</td><td>快</td><td>中等</td><td>大多数用户(8-16GB 内存)</td></tr>
+      <tr><td>4B</td><td>~2.5 GB</td><td>慢</td><td>高</td><td>16GB+ 内存,追求质量</td></tr>
+    </tbody>
+  </table>
+  <div class="callout">
+    <p>苹果 M2 / M3 上,1.7B 模型生成速度通常 30+ tokens/s,4B 模型 10-15 tokens/s。Windows 走 CPU,速度约为 macOS 的 1/3。</p>
+  </div>
+
+  <h2>怎么提问效果好</h2>
+  <h3>具体 vs 模糊</h3>
+  <ul>
+    <li>❌ "这个项目的情况"</li>
+    <li>✅ "X 项目 Q3 的进度延期原因有哪些"</li>
+  </ul>
+  <h3>提供关键词锚点</h3>
+  <p>AI 通过你的关键词去检索文档,所以问题里包含 <strong>独特的关键词</strong> 比 <strong>泛泛的描述</strong> 命中率高得多。</p>
+  <ul>
+    <li>❌ "讲一下产品规划"</li>
+    <li>✅ "DocMind 0.3 版本规划包含哪些核心功能"</li>
+  </ul>
+
+  <h3>分阶段提问</h3>
+  <p>复杂问题先拆解。AI 在小范围回答比让它"列一份完整方案"更准确。</p>
+
+  <h2>连续对话 vs 单次问答</h2>
+  <p>顶部的「连续对话」开关:</p>
+  <ul>
+    <li><strong>开启</strong>:AI 会记住之前几轮内容,适合追问("那这个项目的预算呢?")</li>
+    <li><strong>关闭</strong>:每个问题独立检索,适合主题切换</li>
+  </ul>
+  <p>如果发现 AI"自由发挥"或开始混淆话题,关闭连续对话能让回答更聚焦。</p>
+
+  <h2>参考来源解读</h2>
+  <p>每个 AI 回答下方都有"参考来源(N)"展开按钮。AI 是基于这些片段回答的,如果答案有疑虑,点击可直接打开原文件验证。</p>
+  <p>如果 AI 给出的答案 <strong>没有任何来源</strong> 或来源与问题不相关 — 说明 RAG 没找到相关上下文,AI 在"猜",这种情况下答案可信度低。</p>
+
+  <h2>批量摘要(Pro)</h2>
+  <ol>
+    <li>在搜索结果中点击右上角批量模式图标</li>
+    <li>勾选最多 10 篇文档</li>
+    <li>点击「生成摘要」</li>
+    <li>AI 会一次性读完这些文档,在问答面板输出统一摘要</li>
+  </ol>
+  <p>典型场景:同主题合同对比、多份会议纪要月度汇总、研究文献综述。</p>
+
+  <h2>性能调优</h2>
+  <ul>
+    <li>如果生成卡顿,试试切换到 0.6B 模型</li>
+    <li>如果答案太短或被截断,关闭连续对话减少 prompt 长度</li>
+    <li>如果模型加载失败 / 应用崩溃,可能是内存不足 — 关闭其他程序,或换更小的模型</li>
+  </ul>
+
+  <h2>API 模式(高级)</h2>
+  <p>如果你不想用本地 LLM,而想接入云端 OpenAI 兼容接口(如 DeepSeek API、自部署的 vLLM 等),可在「设置 → API LLM」开启。</p>
+  <p><strong>注意</strong>:启用 API 模式后,你的查询会发送到你配置的端点,不再是本地推理 — 请确认你信任该端点。这是用户主动选择,DocMind 默认不启用。</p>
+</DocsLayout>

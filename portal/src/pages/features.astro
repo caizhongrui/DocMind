@@ -1,0 +1,113 @@
+---
+import Layout from "../layouts/Layout.astro";
+
+const sections = [
+  {
+    eyebrow: "全文搜索",
+    title: "Lucene 级别的中文全文索引",
+    body: `基于 Rust 编写的 Tantivy 全文索引引擎,毫秒级返回结果。原生支持中文分词、繁简切换、英文 stemming。完整支持 AND/OR/NOT/精确短语 等查询语法,适合在合同、年报、纪要等大量文本中精确定位关键句。`,
+    bullets: [
+      "支持 PDF、Word、Excel、PPT、Markdown、TXT 等 20+ 格式",
+      "中英文混合关键词、模糊匹配、相关度排序",
+      "BM25 评分算法,关键句自动突出展示",
+      "ZIP 压缩包内文件自动解析索引",
+    ],
+  },
+  {
+    eyebrow: "AI 语义搜索",
+    title: "用自然语言找内容,而非关键词",
+    body: `本地运行的中文 Embedding 模型(bge-small-zh-v1.5,~100MB)把每段文档转成 512 维向量,搜索时通过余弦相似度匹配语义。即使你不记得原文用词,只要描述大意就能找到。`,
+    bullets: [
+      '"上个季度的销售总结" → 找到的是 Q3 业绩报告',
+      "查询和文档语言可以不一样(中英文跨语义)",
+      "完全本地推理,不调任何云 API",
+      "通过 ONNX Runtime 加速,索引速度 ~50 KB/s",
+    ],
+  },
+  {
+    eyebrow: "AI 文档问答",
+    title: "把整个文档库变成对话伙伴",
+    body: `通过 RAG(Retrieval-Augmented Generation)架构,DocMind 先用语义搜索找到最相关的片段,再交给本地 LLM(Qwen3 系列)生成回答。每个答案都附带可点击的文件来源,可追溯到原句。`,
+    bullets: [
+      "三档模型可选:0.6B 轻量 / 1.7B 推荐 / 4B 高质量",
+      "macOS Metal GPU 加速,M2 上 1.7B 模型 30+ tokens/s",
+      "连续对话模式,AI 自动保留上下文",
+      "支持批量摘要(Pro):同时阅读多篇文档输出汇总",
+    ],
+  },
+  {
+    eyebrow: "OCR 扫描件",
+    title: "把扫描合同、票据、白板照变成可搜内容",
+    body: `调用系统原生 OCR 引擎(macOS Vision Framework / Windows OCR)提取图片和扫描件中的文字,识别后写入索引。完全离线,不传云端。`,
+    bullets: [
+      "支持 JPG / PNG / BMP / TIFF / WebP",
+      "扫描型 PDF 自动光栅化后逐页 OCR",
+      "中英文混排识别准确率 ≥ 95%(基于系统模型)",
+      "Pro 版功能,免费版只索引已有文字层",
+    ],
+  },
+  {
+    eyebrow: "隐私优先",
+    title: "你的文档,真正属于你的电脑",
+    body: `DocMind 是少数完全本地优先的文档搜索工具。我们不开发任何云服务,不上传任何数据,App 默认无网络访问 — 唯一会联网的是模型/版本下载,且只走你授权的源。`,
+    bullets: [
+      "无账号体系 / 无邮箱注册",
+      "无遥测、无埋点、无 crash report 自动上传",
+      "支持完全离线 / 内网部署",
+      "源代码透明,License 离线验证",
+    ],
+  },
+];
+---
+
+<Layout title="功能" description="DocMind 的全部能力详解 — 全文搜索、AI 语义、文档问答、OCR、隐私设计。">
+  <section class="border-b border-ink-200 bg-gradient-hero">
+    <div class="mx-auto max-w-6xl px-6 py-20 text-center">
+      <h1 class="text-4xl font-bold tracking-tight text-ink-900 md:text-5xl">为什么用 DocMind</h1>
+      <p class="mx-auto mt-4 max-w-2xl text-lg text-ink-600">
+        三种搜索引擎、本地 AI 推理、完整离线运行 — 这些不是营销话术,是 DocMind 真实做到的事。
+      </p>
+    </div>
+  </section>
+
+  {sections.map((s, i) => (
+    <section class={`border-b border-ink-200 ${i % 2 === 0 ? "bg-white" : "bg-ink-50"}`}>
+      <div class="mx-auto grid max-w-6xl gap-12 px-6 py-20 md:grid-cols-5">
+        <div class="md:col-span-2">
+          <span class="text-xs font-semibold uppercase tracking-wider text-primary-600">
+            {s.eyebrow}
+          </span>
+          <h2 class="mt-3 text-3xl font-bold leading-tight text-ink-900">{s.title}</h2>
+        </div>
+        <div class="md:col-span-3">
+          <p class="text-base leading-relaxed text-ink-700">{s.body}</p>
+          <ul class="mt-6 space-y-3">
+            {s.bullets.map((b) => (
+              <li class="flex items-start gap-3 text-sm text-ink-700">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.5" class="mt-0.5 h-4 w-4 flex-shrink-0">
+                  <path d="m5 13 4 4L19 7" />
+                </svg>
+                <span>{b}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </section>
+  ))}
+
+  <section class="bg-white">
+    <div class="mx-auto max-w-3xl px-6 py-16 text-center">
+      <h2 class="text-2xl font-bold text-ink-900">还想了解更多?</h2>
+      <p class="mt-3 text-base text-ink-600">从快速入门到 AI 问答深度技巧,文档里都讲得很清楚。</p>
+      <div class="mt-6 flex flex-wrap justify-center gap-3">
+        <a href="/docs/getting-started" class="rounded-lg bg-primary-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-primary-700">
+          阅读文档
+        </a>
+        <a href="/download" class="rounded-lg border border-ink-200 px-5 py-2.5 text-sm font-medium text-ink-900 transition hover:border-ink-300">
+          直接下载
+        </a>
+      </div>
+    </div>
+  </section>
+</Layout>

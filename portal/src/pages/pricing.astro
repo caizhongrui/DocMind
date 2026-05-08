@@ -1,0 +1,188 @@
+---
+import Layout from "../layouts/Layout.astro";
+
+const compare = [
+  { label: "全文搜索", free: true, pro: true },
+  { label: "文件名搜索", free: true, pro: true },
+  { label: "多文件夹监听(无限)", free: true, pro: true },
+  { label: "PDF / Office / 文本 / ZIP 预览", free: true, pro: true },
+  { label: "全局快捷键", free: true, pro: true },
+  { label: "AI 语义搜索", free: "30 次/月", pro: "无限" },
+  { label: "AI 文档问答", free: "30 次/月", pro: "无限" },
+  { label: "可用 LLM 模型", free: "0.6B 轻量", pro: "0.6B / 1.7B / 4B" },
+  { label: "导入自定义 GGUF", free: false, pro: true },
+  { label: "OCR 索引扫描件 / 图片", free: false, pro: true },
+  { label: "批量摘要(最多 10 篇)", free: false, pro: true },
+  { label: "对话导出(Markdown)", free: false, pro: true },
+  { label: "CSV 大批量导出(>100 条)", free: false, pro: true },
+  { label: "定时重索引", free: false, pro: true },
+  { label: "终身免费更新", free: false, pro: true },
+];
+
+function fmt(v: boolean | string) {
+  if (v === true) {
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2.5" class="inline h-4 w-4"><path d="m5 13 4 4L19 7"/></svg>`;
+  }
+  if (v === false) {
+    return `<span class="text-ink-300">—</span>`;
+  }
+  return `<span class="text-sm text-ink-700">${v}</span>`;
+}
+---
+
+<Layout
+  title="定价"
+  description="DocMind 定价 — 免费版完整可用,Pro ¥20 终身买断,5 天免费试用。"
+>
+  <section class="border-b border-ink-200 bg-gradient-hero">
+    <div class="mx-auto max-w-6xl px-6 pb-12 pt-20 text-center">
+      <h1 class="text-4xl font-bold tracking-tight text-ink-900 md:text-5xl">简单透明的定价</h1>
+      <p class="mx-auto mt-4 max-w-2xl text-lg text-ink-600">
+        Free 永久免费且完整可用,Pro ¥20 一次买断 — 没有订阅,没有套路。
+      </p>
+    </div>
+  </section>
+
+  <section class="bg-gradient-hero pb-20">
+    <div class="mx-auto grid max-w-4xl gap-6 px-6 md:grid-cols-2">
+      <!-- Free -->
+      <div class="rounded-2xl border border-ink-200 bg-white p-8 shadow-sm">
+        <h2 class="text-xl font-semibold text-ink-900">Free</h2>
+        <p class="mt-2 text-sm text-ink-500">完整本地搜索 + 体验 AI</p>
+        <div class="mt-6 flex items-baseline gap-2">
+          <span class="text-4xl font-bold text-ink-900">¥0</span>
+          <span class="text-sm text-ink-500">/ 永久免费</span>
+        </div>
+        <a href="/download" class="mt-7 inline-flex w-full items-center justify-center rounded-lg border border-ink-200 px-4 py-3 text-sm font-medium text-ink-900 transition hover:border-ink-300">
+          立即免费下载
+        </a>
+        <ul class="mt-6 space-y-3 text-sm text-ink-700">
+          <li class="flex gap-2"><span class="text-primary-500">✓</span>完整全文 + 文件名搜索</li>
+          <li class="flex gap-2"><span class="text-primary-500">✓</span>每月 30 次 AI 语义/问答</li>
+          <li class="flex gap-2"><span class="text-primary-500">✓</span>0.6B 轻量本地 LLM</li>
+          <li class="flex gap-2 text-ink-400"><span>—</span>不能导入自定义 GGUF</li>
+          <li class="flex gap-2 text-ink-400"><span>—</span>不能索引扫描件 / 图片</li>
+        </ul>
+      </div>
+
+      <!-- Pro -->
+      <div class="relative rounded-2xl border-2 border-primary-500 bg-white p-8 shadow-lg shadow-primary-100">
+        <div class="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-primary-600 px-3 py-1 text-xs font-semibold text-white">
+          推荐
+        </div>
+        <h2 class="text-xl font-semibold text-ink-900">Pro</h2>
+        <p class="mt-2 text-sm text-primary-700">解锁全部功能 · 一次买断</p>
+        <div class="mt-6 flex items-baseline gap-2">
+          <span class="text-4xl font-bold text-ink-900">¥20</span>
+          <span class="text-sm text-ink-500">/ 终身</span>
+        </div>
+        <a
+          href="https://api.docmind.app/payment/checkout?plan=lifetime"
+          class="mt-7 inline-flex w-full items-center justify-center rounded-lg bg-primary-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-primary-700"
+        >
+          立即购买
+        </a>
+        <p class="mt-2 text-center text-xs text-ink-500">支持支付宝 / 微信支付</p>
+        <ul class="mt-6 space-y-3 text-sm text-ink-700">
+          <li class="flex gap-2"><span class="text-primary-500">✓</span>无限 AI 语义搜索 + 问答</li>
+          <li class="flex gap-2"><span class="text-primary-500">✓</span>全部模型档位 + 自定义 GGUF</li>
+          <li class="flex gap-2"><span class="text-primary-500">✓</span>OCR 索引扫描件 / 图片</li>
+          <li class="flex gap-2"><span class="text-primary-500">✓</span>批量摘要 / 对话导出</li>
+          <li class="flex gap-2"><span class="text-primary-500">✓</span>终身免费更新</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Device binding warning -->
+    <div class="mx-auto mt-10 max-w-3xl px-6">
+      <div class="rounded-xl border border-amber-200 bg-amber-50 p-5">
+        <div class="flex gap-3">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" class="h-5 w-5 flex-shrink-0">
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01" />
+          </svg>
+          <div class="text-sm leading-relaxed text-amber-900">
+            <strong>License 绑定到当前设备。</strong>
+            一旦激活,Pro license 就和这台设备的硬件指纹绑定,无法转移到其他机器。
+            换电脑、重装系统、更换主板都会导致 license 失效需要重新购买。
+            <strong>请在你常用的设备上完成激活。</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Comparison table -->
+  <section class="border-t border-ink-200 bg-white">
+    <div class="mx-auto max-w-4xl px-6 py-20">
+      <h2 class="text-3xl font-bold tracking-tight text-ink-900">详细对比</h2>
+      <p class="mt-3 text-base text-ink-600">每一项功能在 Free 和 Pro 的差异。</p>
+
+      <div class="mt-10 overflow-hidden rounded-xl border border-ink-200">
+        <table class="w-full border-collapse text-sm">
+          <thead>
+            <tr class="bg-ink-50 text-left text-xs uppercase tracking-wider text-ink-500">
+              <th class="px-4 py-3 font-medium">能力</th>
+              <th class="px-4 py-3 text-center font-medium">Free</th>
+              <th class="px-4 py-3 text-center font-medium">Pro</th>
+            </tr>
+          </thead>
+          <tbody>
+            {compare.map((row) => (
+              <tr class="border-t border-ink-200">
+                <td class="px-4 py-3 text-ink-900">{row.label}</td>
+                <td class="px-4 py-3 text-center" set:html={fmt(row.free)} />
+                <td class="px-4 py-3 text-center" set:html={fmt(row.pro)} />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="border-t border-ink-200 bg-ink-50">
+    <div class="mx-auto max-w-3xl px-6 py-20">
+      <h2 class="text-3xl font-bold tracking-tight text-ink-900">关于定价的常见问题</h2>
+      <div class="mt-10 space-y-6">
+        <div>
+          <h3 class="text-base font-semibold text-ink-900">为什么这么便宜?</h3>
+          <p class="mt-2 text-sm text-ink-700">
+            DocMind 由独立开发者维护,所有 AI 推理在用户本地完成,我们没有 GPU / 云端 / 流量成本。
+            ¥20 是 "支持开发者继续做下去" 的合理定价,不是商业咨询级别的价格。
+          </p>
+        </div>
+        <div>
+          <h3 class="text-base font-semibold text-ink-900">买完会有订阅自动续费吗?</h3>
+          <p class="mt-2 text-sm text-ink-700">
+            没有。¥20 是终身买断,一次性付款,享受所有未来更新,永远不会再扣费。
+          </p>
+        </div>
+        <div>
+          <h3 class="text-base font-semibold text-ink-900">换电脑怎么办?</h3>
+          <p class="mt-2 text-sm text-ink-700">
+            License 绑定单一设备且不可转移。换机需要重新购买。这个限制是产品设计选择 —
+            为了让定价能保持极低,我们不维护客服级别的解绑流程。
+            建议在你的主力工作设备上完成激活。
+          </p>
+        </div>
+        <div>
+          <h3 class="text-base font-semibold text-ink-900">试用版有什么限制?</h3>
+          <p class="mt-2 text-sm text-ink-700">
+            5 天试用解锁除"导入自定义 GGUF 模型"以外的全部 Pro 功能,
+            自定义模型限制是为了防止规避 license 系统。其余完全等同于 Pro。
+            试用结束后自动降级为 Free,数据完整保留。
+          </p>
+        </div>
+        <div>
+          <h3 class="text-base font-semibold text-ink-900">能开发票吗?</h3>
+          <p class="mt-2 text-sm text-ink-700">
+            个人开发者目前暂不开发票,如果你需要为公司报销,请通过
+            <a class="text-primary-600 hover:underline" href="/contact">联系页</a>
+            告诉我们,我们正在评估接入企业开票方案。
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+</Layout>
