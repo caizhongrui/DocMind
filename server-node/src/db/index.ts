@@ -76,8 +76,12 @@ function adapt(raw: WasmDatabaseInstance): Database {
 export function openDb(path: string): Database {
   if (_db) return _db;
   const raw = new WasmDatabase(path);
-  raw.exec("PRAGMA journal_mode = WAL;");
+  // node-sqlite3-wasm runs SQLite inside a WASM sandbox without OS-level
+  // shared memory, so WAL journaling is not supported (it triggers
+  // "database is locked"). Stay on the default rollback journal.
   raw.exec("PRAGMA foreign_keys = ON;");
+  raw.exec("PRAGMA synchronous = NORMAL;");
+  raw.exec("PRAGMA busy_timeout = 5000;");
   const adapted = adapt(raw);
   applyMigrations(adapted);
   _db = adapted;
