@@ -83,8 +83,9 @@ pub type SharedLicense = Arc<RwLock<LicenseState>>;
 ///    machine and which has not expired → `Plan::Pro`.
 /// 2. A trial marker whose fingerprint matches and whose 5-day window is
 ///    still open → `Plan::Trial`.
-/// 3. Otherwise → `Plan::Free`. A trial marker is created on first run
-///    (the user has never seen the app before).
+/// 3. A trial marker that has expired → `Plan::Free` ("trial_expired").
+/// 4. No marker at all → `Plan::Free` ("no_trial_yet"). The trial is
+///    **opt-in**: the user must click "开始试用" to flip into Trial.
 pub fn bootstrap(app_data_dir: &Path) -> LicenseState {
     let fp = fingerprint::current();
 
@@ -96,11 +97,12 @@ pub fn bootstrap(app_data_dir: &Path) -> LicenseState {
         }
     }
 
-    let marker = storage::ensure_trial(app_data_dir, &fp);
-    if marker.is_active(TRIAL_DAYS) && marker.fingerprint == fp {
-        LicenseState::trial(fp, &marker)
-    } else {
-        LicenseState::free(fp, "trial_expired")
+    match storage::read_trial(app_data_dir) {
+        Some(marker) if marker.fingerprint == fp && marker.is_active(TRIAL_DAYS) => {
+            LicenseState::trial(fp, &marker)
+        }
+        Some(_) => LicenseState::free(fp, "trial_expired"),
+        None => LicenseState::free(fp, "no_trial_yet"),
     }
 }
 

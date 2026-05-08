@@ -78,12 +78,14 @@ pub fn write_trial(app_data_dir: &Path, marker: &TrialMarker) -> std::io::Result
     std::fs::write(trial_path(app_data_dir), json)
 }
 
-/// Returns the existing trial marker, or creates a fresh 5-day trial on first
-/// run and returns it.
-pub fn ensure_trial(app_data_dir: &Path, fingerprint: &str) -> TrialMarker {
+/// Start a fresh 5-day trial bound to this fingerprint.
+///
+/// Returns `None` if a marker already exists for this fingerprint — we
+/// don't allow restarting (the trial is a one-time freebie).
+pub fn start_trial(app_data_dir: &Path, fingerprint: &str) -> Option<TrialMarker> {
     if let Some(existing) = read_trial(app_data_dir) {
         if existing.fingerprint == fingerprint {
-            return existing;
+            return None; // already used
         }
     }
     let marker = TrialMarker {
@@ -91,5 +93,5 @@ pub fn ensure_trial(app_data_dir: &Path, fingerprint: &str) -> TrialMarker {
         fingerprint: fingerprint.to_string(),
     };
     let _ = write_trial(app_data_dir, &marker);
-    marker
+    Some(marker)
 }

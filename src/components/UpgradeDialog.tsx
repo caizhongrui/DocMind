@@ -199,6 +199,25 @@ export default function UpgradeDialog() {
     setPaymentError(null);
   };
 
+  const [startingTrial, setStartingTrial] = useState(false);
+  const [trialError, setTrialError] = useState<string | null>(null);
+  const trialEligible = status?.plan === "free" && status?.reason === "no_trial_yet";
+
+  const handleStartTrial = async () => {
+    setTrialError(null);
+    setStartingTrial(true);
+    try {
+      await invoke("start_trial");
+      await refreshLicense();
+      closeUpgrade();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setTrialError(msg === "TRIAL_ALREADY_USED" ? "试用已使用过,无法再次启用" : msg);
+    } finally {
+      setStartingTrial(false);
+    }
+  };
+
   const handleActivate = async () => {
     setActivationError(null);
     setActivating(true);
@@ -452,6 +471,52 @@ export default function UpgradeDialog() {
                 }}
               >
                 {paymentError}
+              </div>
+            )}
+            {trialError && (
+              <div
+                style={{
+                  marginBottom: 8,
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  background: "rgba(239,68,68,0.08)",
+                  border: "1px solid rgba(239,68,68,0.25)",
+                  fontSize: 12,
+                  color: "#dc2626",
+                }}
+              >
+                {trialError}
+              </div>
+            )}
+            {trialEligible && (
+              <div
+                style={{
+                  marginBottom: 10,
+                  padding: "10px 12px",
+                  borderRadius: 6,
+                  background: "var(--color-surface-elevated)",
+                  border: "1px solid var(--color-border)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text)" }}>
+                    免费试用 5 天
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
+                    解锁全部 Pro 功能,无需付款。一台机器仅一次。
+                  </div>
+                </div>
+                <Button
+                  size="small"
+                  loading={startingTrial}
+                  onClick={handleStartTrial}
+                >
+                  开始试用
+                </Button>
               </div>
             )}
             <Space style={{ width: "100%", justifyContent: "space-between" }}>

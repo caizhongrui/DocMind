@@ -122,6 +122,35 @@ pub fn get_hardware_fingerprint() -> String {
     fingerprint::current()
 }
 
+/// Start the 5-day Pro trial for this device.
+///
+/// Trials are one-shot per fingerprint: if a marker already exists we
+/// return `TRIAL_ALREADY_USED` and the front-end should hide the button.
+/// On success, runtime state flips to Plan::Trial and the resulting
+/// LicenseStatus is returned.
+#[tauri::command]
+pub fn start_trial(app: AppHandle, state: State<'_, AppState>) -> Result<LicenseStatus, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {e}"))?;
+    let fp = fingerprint::current();
+    let marker = crate::license::storage::start_trial(&app_data_dir, &fp)
+        .ok_or_else(|| "TRIAL_ALREADY_USED".to_string())?;
+
+    let new_state = LicenseState::trial(fp, &marker);
+    {
+        let mut w = state
+            .license
+            .write()
+            .map_err(|e| format!("license lock: {e}"))?;
+        *w = new_state.clone();
+    }
+    let _ = app.emit("license-updated", &new_state);
+
+    get_license_status(state)
+}
+
 /// Returns the snapshot of the AI quota counter.
 #[tauri::command]
 pub fn get_quota(state: State<'_, AppState>) -> Result<quota::QuotaSnapshot, String> {

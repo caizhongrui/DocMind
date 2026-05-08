@@ -461,6 +461,7 @@ pub fn run() {
             commands::license::get_license_status,
             commands::license::install_license_token,
             commands::license::clear_license,
+            commands::license::start_trial,
             commands::license::get_hardware_fingerprint,
             commands::license::get_quota,
         ])
