@@ -209,29 +209,61 @@ async fn import_custom_gguf(state: State<AppState>, ...) -> Result<...> {
 
 ## 服务端架构
 
-### 部署形态
+### 部署形态(双子域共用单容器)
 
 ```
-[客户机器]
-    ↓ HTTPS
-[备案服务器: license.docmind.app:443]
-    └── 单 Docker 容器 docmind/server:latest
-        ├── Caddy(自动 ACME)
-        ├── Axum API server
-        ├── 嵌入式 SQLite(/data/db/docmind.sqlite)
-        ├── 静态文件服务(/data/releases/)
-        └── 私钥(/data/keys/ed25519.priv)
+[客户机器 / 浏览器]
+        ↓ HTTPS
+┌────────────────────────────────────────────────────────────┐
+│  备案服务器                                                 │
+│  └── 单 Docker 容器 docmind/server:latest                  │
+│      ├── Caddy(自动 ACME)                                 │
+│      │   ├── docmind.app          → 静态门户站(Astro 产物)│
+│      │   └── api.docmind.app      → Axum API + admin      │
+│      ├── Axum API server                                   │
+│      ├── 嵌入式 SQLite(/data/db/docmind.sqlite)           │
+│      ├── 静态文件服务(/data/releases/)                    │
+│      ├── 门户站静态产物(/app/portal/dist/)               │
+│      └── 私钥(/data/keys/ed25519.priv)                    │
+└────────────────────────────────────────────────────────────┘
 ```
+
+**子域职责**:
+
+| 子域 | 用途 | 技术 |
+|---|---|---|
+| `docmind.app` | 营销门户(SEO + 转化)| Astro 静态站,产品营销风(亮色) |
+| `api.docmind.app` | License / 支付 / 更新 / 管理 / 激活 / 下载 | Axum |
+
+两个子域指向同一台备案服务器同一容器,Caddy 通过 `Host` 头分流。
 
 ### 路由
 
+**`docmind.app`(静态门户)**
 ```
-GET  /                                      落地页(产品介绍 + 立即购买)
-GET  /pricing                               定价 + 设备绑定提示
-GET  /activate?key=DM-XXXX                  客户端跳转的激活页(展示 key + 设备识别)
+/                         首页:Hero + 三大核心卖点 + 截图 + 主 CTA
+/features                 功能详解:全文/语义/问答/OCR/隐私 五大分块
+/pricing                  定价对比表 + 设备绑定提示 + 购买按钮
+/download                 下载页:macOS/Windows 直链 + 系统要求 + sha256
+/docs                     使用文档首页(侧边栏导航)
+/docs/getting-started     入门
+/docs/search-syntax       搜索语法
+/docs/ai-qa               AI 问答指南
+/docs/faq                 常见问题
+/changelog                版本历史(构建期从 api 拉取)
+/privacy                  隐私政策
+/terms                    服务条款
+/contact                  联系方式
+sitemap.xml / robots.txt  SEO 必备
+```
+
+**`api.docmind.app`(动态服务)**
+```
+GET  /activate?key=DM-XXXX                  激活页(展示 key + 设备识别 + 提交)
 
 POST /api/v1/license/activate               { key, fingerprint } → LicenseToken
 POST /api/v1/payment/payjs/webhook          PayJS 异步通知
+GET  /api/v1/releases/public                公开 changelog JSON(供门户站构建期拉取)
 
 GET  /api/v1/updates/{platform}/{cur_ver}   Tauri updater manifest
 GET  /releases/free/<platform>/<file>       免费版二进制(公开,记录下载)
@@ -246,6 +278,12 @@ GET  /admin/downloads                       下载日志
 GET  /admin/releases                        版本管理
 POST /admin/releases/upload                 上传新版本
 ```
+
+**跨域协作**:
+- 门户站的"立即购买"按钮 → 跳 `https://api.docmind.app/payment/checkout?plan=lifetime`
+- 门户站的"输入 key 激活"按钮 → 跳 `https://api.docmind.app/activate`
+- API 端的 `/api/v1/releases/public` 在门户站 build 期被拉取一次,渲染进 `/changelog` 静态页;新版本发布后重 build 镜像即可
+- 门户站不需要 cookies / session,完全静态
 
 ### 数据库 Schema
 
@@ -459,6 +497,113 @@ docker compose up -d
 
 ---
 
+## 营销门户站(docmind.app)
+
+### 设计风格 — 产品营销路线(明确区别于客户端)
+
+客户端是 Raycast 风(暗色优先、密集、工具感),门户站走**亮色 + 高转化**方向:
+
+- **配色**:白色为主背景 + 蓝色品牌色(`#1677ff`)+ 大量留白
+- **Hero**:大字标题 + 一句话价值主张 + 屏幕截图悬浮卡片 + 渐变背景
+- **CTA**:鲜明的购买/下载按钮,首屏可见
+- **截图**:每个功能配上动图或截图,展示真实体验
+- **社交证明**:用户数 / 下载量 / 用户证言(早期可不放)
+- **响应式**:桌面优先,但移动端不能挂
+
+**字体**:`-apple-system` 系列做正文,标题用 **Inter** 增强西文质感,代码块/数据用 mono。
+
+### 技术栈
+
+| 层 | 选择 |
+|---|---|
+| **框架** | **Astro 4**(零 JS 输出 + 局部 React 岛屿,SEO 极佳)|
+| **样式** | Tailwind CSS(快、约束清晰,适合营销页迭代)|
+| **内容** | `/content/` 下 markdown 文件,Astro Content Collections 管理 docs/changelog |
+| **图标** | `lucide-react` |
+| **构建产物** | 纯静态 `dist/`(HTML/CSS/JS),Caddy 直接 serve |
+| **构建** | 在客户端 Dockerfile 里:`pnpm build` → COPY 进容器 |
+
+### 页面清单(10 个页面 + 站点资源)
+
+| 路径 | 内容要点 |
+|---|---|
+| `/` | Hero(标题 + 副标题 + 主 CTA) / 三大核心卖点(本地隐私 / AI 语义 / 全格式)/ 功能截图轮播 / 用户场景 / 定价摘要 / FAQ 摘要 / 底部 CTA |
+| `/features` | 五大分块:**全文搜索**(Tantivy + 文件类型 + 速度)/ **语义搜索**(本地嵌入)/ **AI 问答**(RAG + 引用源)/ **OCR**(扫描件 + 图片)/ **隐私**(零上传 + 离线推理) |
+| `/pricing` | Free vs Pro 对比表(沿用 spec 矩阵) + 设备绑定**红色提示**(强制可见) + 立即购买按钮(跳 api 子域) + 已购用户激活入口 |
+| `/download` | 平台选择卡片(macOS Apple Silicon / macOS Intel / Windows x64) + 系统要求 + SHA256 + 历史版本链接 + 安装指引 |
+| `/docs` | Docs 首页:侧边栏导航 + 快速入门链接 + 搜索框(可选,DocSearch / Pagefind 本地索引)|
+| `/docs/getting-started` | 装包 → 加文件夹 → 第一次搜索 → 触发问答 |
+| `/docs/search-syntax` | AND/OR/NOT/精确短语 + 中英文混合 + 实例 |
+| `/docs/ai-qa` | 模型档位说明 / 提问技巧 / 引用源解读 / 性能调优 |
+| `/docs/faq` | ~15 条:为什么收费?换电脑怎么办?数据上传吗?支持 M1 吗?... |
+| `/changelog` | 按版本倒序,从 `api/v1/releases/public` 构建期拉取后渲染 |
+| `/privacy` | 数据归属:用户本地。模型推理:本地。下载日志:服务器仅留 IP/版本/时间。无 telemetry |
+| `/terms` | License 范围(单设备 + 不可转移)、退款政策(7 天无条件 / 已激活后看情况)、责任限制 |
+| `/contact` | 邮箱 + 微信(可选)+ GitHub Issues(可选)|
+
+### 内容初稿策略
+
+我会写出:
+- **首页 hero 文案**(主+副标题,3 个版本备选)
+- **三大卖点段落**(每段 ~50 字 + emoji/icon)
+- **5 个 features 分块文案**(每块 ~150 字 + 关键截图位)
+- **15 条 FAQ 初稿**
+- **隐私 / 服务条款** 模板(基于通用模板改写)
+
+你来定稿、提供截图、签发布。
+
+### SEO 基础
+
+- 每页独立 `<title>` + `<meta description>` + `<meta og:*>` + `<meta twitter:*>`
+- `sitemap.xml` 自动生成(Astro 插件)
+- `robots.txt`:`Allow: /`,屏蔽 `/admin`(api 子域)
+- 结构化数据:`SoftwareApplication` schema(首页) + `FAQPage` schema(FAQ)
+- 关键词主线:`本地文档搜索`、`AI 文档问答`、`PDF 全文搜索`、`隐私优先 文档管理`
+
+### 部署集成
+
+`Dockerfile` 多阶段构建:
+```dockerfile
+# Stage 1 - Portal build
+FROM node:20-alpine AS portal-builder
+WORKDIR /portal
+COPY portal/ .
+RUN corepack enable && pnpm install && pnpm build
+# 产物:/portal/dist
+
+# Stage 2 - API build
+FROM rust:1.83 AS api-builder
+WORKDIR /api
+COPY server/ .
+RUN cargo build --release
+
+# Stage 3 - Runtime
+FROM debian:bookworm-slim
+COPY --from=portal-builder /portal/dist /app/portal
+COPY --from=api-builder /api/target/release/docmind-server /usr/local/bin/
+COPY Caddyfile /etc/caddy/Caddyfile
+# Caddy 配置里 docmind.app 指向 /app/portal,api.docmind.app 反代到 :8080
+ENTRYPOINT ["/entrypoint.sh"]
+```
+
+`Caddyfile`:
+```
+docmind.app {
+    root * /app/portal
+    file_server
+    encode gzip zstd
+    try_files {path} {path}.html /index.html
+}
+
+api.docmind.app {
+    reverse_proxy localhost:8080
+}
+```
+
+部署仍然是 `docker compose up -d` 一条命令,门户和 API 一起起。
+
+---
+
 ## 客户端集成点
 
 ### 新增模块
@@ -516,19 +661,41 @@ src/stores/licenseStore.ts      Zustand: { state, plan, expiresAt, refresh() }
 
 ## 实施阶段
 
+按功能领域分组,可独立验收:
+
+### Group 1 — 客户端付费基础(2.5 d)
 | 阶段 | 内容 | 工作量 |
 |---|---|---:|
 | **4a** | License 协议 + 硬件指纹 + 客户端校验 crate | 0.5 d |
-| **4b** | 服务端骨架(Axum + SQLite + Caddy + Docker)| 0.5 d |
+| **4h** | 客户端门控(`#[require_pro]` 宏 + 四道闸门)| 1 d |
+| **4i** | 客户端 UI(LicenseStatusBar + UpgradeDialog + ActivationPage)| 1 d |
+
+### Group 2 — 服务端核心(2.5 d)
+| 阶段 | 内容 | 工作量 |
+|---|---|---:|
+| **4b** | 服务端骨架(Axum + SQLite + Caddy 双子域配置)| 0.5 d |
 | **4c** | License 签发 / 激活 / 设备绑定 endpoints | 0.5 d |
 | **4d** | PayJS 接入 + webhook + 订单管理 | 0.5 d |
 | **4e** | Updater endpoint + 二进制管理 + 下载日志 | 0.5 d |
-| **4f** | Admin UI(server-rendered)+ 落地页 | 1 d |
-| **4g** | Dockerfile + docker-compose + install.sh + 部署文档 | 0.5 d |
-| **4h** | 客户端门控(`#[require_pro]` 宏 + 四道闸门)| 1 d |
-| **4i** | 客户端 UI(LicenseStatusBar + UpgradeDialog + ActivationPage)| 1 d |
-| **4j** | 端到端联调(下单→收 key→激活→功能解锁→更新版本)| 0.5 d |
-| **总计** | | **6.5 d** |
+| **4f** | Admin UI(server-rendered)+ 激活页 | 0.5 d |
+
+### Group 3 — 营销门户(2.5 d)
+| 阶段 | 内容 | 工作量 |
+|---|---|---:|
+| **4k** | 门户站骨架(Astro + Tailwind + 主题 + 路由)| 0.5 d |
+| **4l** | 静态页面实现(首页 / 定价 / 下载 / 联系)| 1 d |
+| **4m** | 文档系统(MD + 侧边栏 + 5 篇 docs)| 0.5 d |
+| **4n** | Changelog + 隐私 + 服务条款 + SEO + 内容初稿 | 0.5 d |
+
+### Group 4 — 部署与联调(1 d)
+| 阶段 | 内容 | 工作量 |
+|---|---|---:|
+| **4g** | Dockerfile(多阶段)+ docker-compose + install.sh + 部署文档 | 0.5 d |
+| **4j** | 端到端联调(下单→收 key→激活→功能解锁→门户站跳转→更新版本)| 0.5 d |
+
+### 总计
+
+**8.5 个工作日**(原 6.5 + 门户 2 余).可以按 Group 顺序串行,也可在客户端 Group 1 跑通后并行 Group 2 与 Group 3。
 
 ---
 
@@ -577,3 +744,6 @@ src/stores/licenseStore.ts      Zustand: { state, plan, expiresAt, refresh() }
 - 推荐返利 / 折扣码
 - 用户自助查询 license 状态(目前需联系客服)
 - 对象存储迁移(达到 100 GB 出站/月再考虑)
+- **博客 / SEO 内容运营**(首发不做,有用户后再加)
+- **门户站英文版 / i18n**(海外推广再加)
+- **门户站 A/B 测试 / Heatmap**
