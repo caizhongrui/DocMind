@@ -51,13 +51,38 @@ export default function UpdateNotifier() {
   const [contentLength, setContentLength] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const isCheckingRef = useRef(false);
+  // Keeps the latest `phase` accessible inside the runCheck closure
+  // without invalidating the useEffect deps array.
+  const phaseRef = useRef<Phase>("idle");
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   // Periodic + startup + manual check. Manual = noisy (toast on
   // up-to-date / error); background = silent.
+  //
+  // Guards:
+  //   - isCheckingRef:   prevents two HTTP fetches from overlapping
+  //   - phase != "idle": once a prompt / progress / installed dialog
+  //                      is already on screen, additional ticks must
+  //                      NOT re-set state. Without this the periodic
+  //                      6h tick (and rapid manual-button clicks)
+  //                      would re-open the modal and visually stack
+  //                      the dismiss-animation frames.
   useEffect(() => {
     let cancelled = false;
     const runCheck = async (manual: boolean) => {
       if (isCheckingRef.current || cancelled) return;
+      // If a prompt is already up, don't spawn another flow.
+      if (phaseRef.current !== "idle") {
+        if (manual) {
+          antdMessage.info({
+            content: "更新提示已经打开",
+            key: "upd-check",
+          });
+        }
+        return;
+      }
       isCheckingRef.current = true;
       if (manual) antdMessage.loading({ content: "正在检查更新…", key: "upd-check" });
       try {
