@@ -27,6 +27,34 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+/**
+ * Detect whether a buffer is the modern Office Open XML format (a ZIP)
+ * or the legacy CFB binary format used by .doc / .xls / .ppt.
+ *   - "ooxml":  PK\x03\x04 — what mammoth / xlsx / pptx-parser expect
+ *   - "cfb":    \xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1 — Word97 / Excel97 /
+ *               PowerPoint97 binary format. Pure-JS readers for this are
+ *               heavy and unreliable, so we surface a helpful message
+ *               instead of letting mammoth blow up with a zip error.
+ *   - "unknown": neither magic matched.
+ */
+function detectOfficeFormat(buf: ArrayBuffer): "ooxml" | "cfb" | "unknown" {
+  const v = new Uint8Array(buf, 0, Math.min(8, buf.byteLength));
+  if (v.length >= 4 && v[0] === 0x50 && v[1] === 0x4b && v[2] === 0x03 && v[3] === 0x04) {
+    return "ooxml";
+  }
+  if (
+    v.length >= 8 &&
+    v[0] === 0xd0 && v[1] === 0xcf && v[2] === 0x11 && v[3] === 0xe0 &&
+    v[4] === 0xa1 && v[5] === 0xb1 && v[6] === 0x1a && v[7] === 0xe1
+  ) {
+    return "cfb";
+  }
+  return "unknown";
+}
+
+const LEGACY_BINARY_MSG =
+  "暂不支持旧版二进制格式（Word 97-2003 .doc / Excel 97-2003 .xls / PowerPoint 97-2003 .ppt）的内嵌预览。请用 Word/Excel/PowerPoint 或 LibreOffice 另存为 .docx / .xlsx / .pptx 后再预览。";
+
 function buildDocxHtml(body: string): string {
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
     * { box-sizing: border-box; }
@@ -141,13 +169,20 @@ export default function OfficePreview({ path, fileType }: Props) {
       .then(async (base64) => {
         if (cancelled) return;
         const buffer = base64ToArrayBuffer(base64);
+        const fmt = detectOfficeFormat(buffer);
 
         if (ft === "docx" || ft === "doc") {
+          if (fmt === "cfb") {
+            // Real legacy .doc — pure-JS parsers exist (e.g. word-extractor)
+            // but they're heavy and partial. Surface a clean message.
+            throw new Error(LEGACY_BINARY_MSG);
+          }
           const mammoth = (await import("mammoth")).default;
           const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
           if (!cancelled) setDocHtml(buildDocxHtml(result.value));
 
         } else if (ft === "xlsx" || ft === "xls" || ft === "csv") {
+          // xlsx CAN read legacy .xls (CFB) — let it try.
           const XLSX = await import("xlsx");
           const workbook = XLSX.read(new Uint8Array(buffer), { type: "array" });
           const sheets: XlsxSheet[] = workbook.SheetNames.map((name: string) => ({
@@ -159,6 +194,9 @@ export default function OfficePreview({ path, fileType }: Props) {
           if (!cancelled) setXlsxSheets(sheets);
 
         } else if (ft === "pptx" || ft === "ppt") {
+          if (fmt === "cfb") {
+            throw new Error(LEGACY_BINARY_MSG);
+          }
           const JSZip = (await import("jszip")).default;
           const zip = await JSZip.loadAsync(buffer);
           const slides = await parsePptxSlides(zip as import("jszip"));
