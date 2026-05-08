@@ -6,6 +6,7 @@
 
 // node-sqlite3-wasm is CommonJS; use default import + destructure.
 import sqlitePkg from "node-sqlite3-wasm";
+import { existsSync, renameSync, unlinkSync } from "node:fs";
 import { applyMigrations } from "./migrations.js";
 
 interface WasmStatement {
@@ -73,19 +74,84 @@ function adapt(raw: WasmDatabaseInstance): Database {
   };
 }
 
+/**
+ * Open the database, healing from any stale state left over by a previous
+ * crashed/killed container.
+ *
+ * Failure modes we handle:
+ *
+ *   1. **Stale recovery files** (`.sqlite-journal`, `.sqlite-wal`, `.sqlite-shm`):
+ *      a previous container died mid-transaction or the DB was previously in
+ *      WAL mode. node-sqlite3-wasm cannot finish recovery because its WASM
+ *      filesystem layer doesn't fully implement the shared-memory locking
+ *      WAL needs. We always delete these on startup.
+ *
+ *   2. **DB file header still says WAL**: even after removing the side files,
+ *      SQLite's header may say "I'm a WAL DB" and refuse normal access. We
+ *      try `PRAGMA journal_mode = DELETE` as the very first op; if it fails,
+ *      the file is unrecoverable in this runtime — we rename it aside and
+ *      let migrations recreate from scratch.
+ *
+ * For DocMind's admin DB the recreate path is acceptable: real licenses
+ * issued via PayJS webhook are append-only and will be re-issued by the
+ * webhook itself if the DB is empty (PayJS retries are idempotent on the
+ * order side).
+ */
 export function openDb(path: string): Database {
   if (_db) return _db;
-  const raw = new WasmDatabase(path);
-  // node-sqlite3-wasm runs SQLite inside a WASM sandbox without OS-level
-  // shared memory, so WAL journaling is not supported (it triggers
-  // "database is locked"). Stay on the default rollback journal.
-  raw.exec("PRAGMA foreign_keys = ON;");
-  raw.exec("PRAGMA synchronous = NORMAL;");
-  raw.exec("PRAGMA busy_timeout = 5000;");
+
+  cleanStaleRecoveryFiles(path);
+
+  let raw: WasmDatabaseInstance;
+  try {
+    raw = new WasmDatabase(path);
+    applyOpenPragmas(raw);
+  } catch (e) {
+    console.error(
+      `[db] failed to open ${path}: ${String(e)} — backing up and recreating`,
+    );
+    if (existsSync(path)) {
+      const backup = `${path}.broken-${Date.now()}`;
+      try {
+        renameSync(path, backup);
+        console.warn(`[db] moved broken database to ${backup}`);
+      } catch (renameErr) {
+        console.error(`[db] could not back up broken database: ${renameErr}`);
+        throw e;
+      }
+    }
+    cleanStaleRecoveryFiles(path);
+    raw = new WasmDatabase(path);
+    applyOpenPragmas(raw);
+  }
+
   const adapted = adapt(raw);
   applyMigrations(adapted);
   _db = adapted;
   return adapted;
+}
+
+function cleanStaleRecoveryFiles(path: string): void {
+  for (const suffix of ["-journal", "-wal", "-shm"]) {
+    const f = path + suffix;
+    if (existsSync(f)) {
+      try {
+        unlinkSync(f);
+        console.warn(`[db] removed stale ${f}`);
+      } catch (e) {
+        console.warn(`[db] could not remove ${f}: ${e}`);
+      }
+    }
+  }
+}
+
+function applyOpenPragmas(raw: WasmDatabaseInstance): void {
+  // First PRAGMA must be journal_mode = DELETE so any leftover WAL header
+  // is rewritten before we touch anything else.
+  raw.exec("PRAGMA journal_mode = DELETE;");
+  raw.exec("PRAGMA foreign_keys = ON;");
+  raw.exec("PRAGMA synchronous = NORMAL;");
+  raw.exec("PRAGMA busy_timeout = 5000;");
 }
 
 export function db(): Database {
