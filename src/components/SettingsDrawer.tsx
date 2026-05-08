@@ -473,7 +473,9 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
                 <div style={{ marginBottom: 4, fontSize: 13 }}>{item.icon}</div>
                 <Statistic
                   value={item.value}
-                  valueStyle={{ fontSize: 14, fontWeight: 600, color: "var(--color-text)", fontFamily: "var(--font-mono)" }}
+                  styles={{
+                    content: { fontSize: 14, fontWeight: 600, color: "var(--color-text)", fontFamily: "var(--font-mono)" },
+                  }}
                 />
                 <Typography.Text type="secondary" style={{ fontSize: 10 }}>{item.label}</Typography.Text>
               </div>
@@ -899,13 +901,30 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
             自动定期重新扫描并更新文件索引。0 分钟 = 禁用。
           </Typography.Text>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <InputNumber
-              min={0} max={10080} step={60}
-              value={reindexInterval}
-              onChange={(v) => v !== null && setReindexInterval(v)}
-              style={{ width: 100 }}
-              addonAfter="分钟"
-            />
+            <Space.Compact>
+              <InputNumber
+                min={0} max={10080} step={60}
+                value={reindexInterval}
+                onChange={(v) => v !== null && setReindexInterval(v)}
+                style={{ width: 100 }}
+              />
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  padding: "0 11px",
+                  height: 32,
+                  border: "1px solid var(--color-border)",
+                  borderLeft: "none",
+                  borderRadius: "0 6px 6px 0",
+                  background: "var(--color-surface-elevated)",
+                  color: "var(--color-text-secondary)",
+                  fontSize: 13,
+                }}
+              >
+                分钟
+              </span>
+            </Space.Compact>
             <Button
               size="small"
               type="primary"
