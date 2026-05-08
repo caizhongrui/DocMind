@@ -13,8 +13,15 @@
 
 import { Hono } from "hono";
 import type { AppEnv } from "../app.js";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, basename } from "node:path";
+import { createHash } from "node:crypto";
+
+const SUPPORTED_PLATFORMS = new Set([
+  "darwin-aarch64",
+  "darwin-x86_64",
+  "windows-x86_64",
+]);
 
 export const apiReleasesRouter = new Hono<AppEnv>();
 
@@ -56,6 +63,79 @@ apiReleasesRouter.get("/updates/:platform/:current_version", (c) => {
         url: `https://${config.domain}/releases/${platform}/${row.file_path}`,
       },
     },
+  });
+});
+
+/**
+ * Token-authed release publish — used by GitHub Actions to sync the
+ * .app.tar.gz / .nsis.zip / .msi.zip updater bundles to this server
+ * after a tagged build finishes.
+ *
+ * Auth: `Authorization: Bearer <RELEASES_PUBLISH_TOKEN>` (env var on
+ * the server, secret in GitHub).
+ *
+ * Body: multipart/form-data with the same fields as the admin form:
+ *   version    string  e.g. "0.1.3"
+ *   platform   string  one of darwin-aarch64 / darwin-x86_64 / windows-x86_64
+ *   notes      string  optional release notes
+ *   signature  string  contents of the .sig file (minisign)
+ *   binary     File    the updater bundle itself
+ */
+apiReleasesRouter.post("/releases/publish", async (c) => {
+  const expected = process.env.RELEASES_PUBLISH_TOKEN;
+  if (!expected) {
+    return c.json({ error: "RELEASES_PUBLISH_TOKEN not set on server" }, 503);
+  }
+  const auth = c.req.header("authorization") ?? "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!token || token !== expected) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+
+  const { db, config } = c.var.app;
+  const form = await c.req.formData();
+  const version = String(form.get("version") ?? "").trim();
+  const platform = String(form.get("platform") ?? "").trim();
+  const notes = String(form.get("notes") ?? "");
+  const signature = String(form.get("signature") ?? "");
+  const binary = form.get("binary");
+
+  if (!version || !platform) return c.json({ error: "version + platform required" }, 400);
+  if (!SUPPORTED_PLATFORMS.has(platform)) {
+    return c.json({ error: `unsupported platform: ${platform}` }, 400);
+  }
+  if (!(binary instanceof File) || binary.size === 0) {
+    return c.json({ error: "missing binary" }, 400);
+  }
+
+  const edition = "all";
+  const dir = join(config.releasesDir, edition, platform);
+  mkdirSync(dir, { recursive: true });
+  const filename = binary.name;
+  const dest = join(dir, filename);
+  const bytes = Buffer.from(await binary.arrayBuffer());
+  writeFileSync(dest, bytes);
+  const sha = createHash("sha256").update(bytes).digest("hex");
+
+  db.prepare(
+    `INSERT INTO releases (version, platform, edition, file_path, sha256, size, signature, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(version, platform, edition) DO UPDATE SET
+       file_path = excluded.file_path,
+       sha256 = excluded.sha256,
+       size = excluded.size,
+       signature = excluded.signature,
+       notes = excluded.notes`,
+  ).run(version, platform, edition, filename, sha, bytes.length, signature, notes);
+
+  console.log(`[releases] published ${platform} ${version} (${filename}, ${bytes.length} bytes)`);
+  return c.json({
+    ok: true,
+    version,
+    platform,
+    file: filename,
+    sha256: sha,
+    size: bytes.length,
   });
 });
 

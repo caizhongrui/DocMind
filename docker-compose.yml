@@ -39,3 +39,9 @@ services:
       WECHAT_NOTIFY_URL: ${WECHAT_NOTIFY_URL:-https://doc-api.boyobang.com/api/v1/payment/wechat/webhook}
 
       PRICE_LIFETIME_FEN: ${PRICE_LIFETIME_FEN:-2000}
+
+      # 用于 GitHub Actions 跑完构建后,自动把 .app.tar.gz / .nsis.zip
+      # 推到 /api/v1/releases/publish 的 Bearer token。生成方式:
+      #   openssl rand -hex 32
+      # 同一个值要写到 GitHub Secret RELEASES_PUBLISH_TOKEN。
+      RELEASES_PUBLISH_TOKEN: ${RELEASES_PUBLISH_TOKEN}

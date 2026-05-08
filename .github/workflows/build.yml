@@ -159,3 +159,73 @@ jobs:
             artifacts/windows-x64/nsis/*.exe.sig
             artifacts/windows-x64/msi/*.msi
             artifacts/windows-x64/msi/*.msi.sig
+
+  # ── Push the updater bundles to the doc-api server so the in-app
+  #    updater can pick them up. Runs after the GitHub Release is up.
+  publish-to-docapi:
+    name: Publish updater bundles to doc-api
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List downloaded artifacts
+        run: find artifacts -type f | sort
+
+      - name: Publish each platform's updater bundle
+        env:
+          PUBLISH_URL: ${{ vars.DOCAPI_PUBLISH_URL || 'https://doc-api.boyobang.com/api/v1/releases/publish' }}
+          PUBLISH_TOKEN: ${{ secrets.RELEASES_PUBLISH_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PUBLISH_TOKEN" ]; then
+            echo "::error::RELEASES_PUBLISH_TOKEN secret not set — skipping doc-api sync"
+            exit 1
+          fi
+          # Strip the leading "v" so the doc-api version column matches
+          # what the in-app updater sends ("0.1.3", not "v0.1.3").
+          version="${VERSION#v}"
+
+          publish() {
+            local platform="$1" updater="$2" sig="$3"
+            if [ ! -f "$updater" ]; then
+              echo "::warning::no updater bundle for $platform at $updater — skipping"
+              return
+            fi
+            if [ ! -f "$sig" ]; then
+              echo "::warning::no signature for $platform at $sig — skipping"
+              return
+            fi
+            echo "▸ uploading $platform: $(basename "$updater")"
+            curl -fsSL -X POST "$PUBLISH_URL" \
+              -H "Authorization: Bearer $PUBLISH_TOKEN" \
+              -F "version=$version" \
+              -F "platform=$platform" \
+              -F "notes=Auto-published from GitHub Release $VERSION" \
+              -F "signature=$(cat "$sig")" \
+              -F "binary=@$updater" \
+              | tee /dev/stderr
+            echo
+          }
+
+          # macOS arm64
+          publish "darwin-aarch64" \
+            "$(ls artifacts/macos-arm64/macos/*.app.tar.gz 2>/dev/null | head -1)" \
+            "$(ls artifacts/macos-arm64/macos/*.app.tar.gz.sig 2>/dev/null | head -1)"
+
+          # macOS x64
+          publish "darwin-x86_64" \
+            "$(ls artifacts/macos-x64/macos/*.app.tar.gz 2>/dev/null | head -1)" \
+            "$(ls artifacts/macos-x64/macos/*.app.tar.gz.sig 2>/dev/null | head -1)"
+
+          # Windows x64 — Tauri's NSIS updater bundle is the .exe itself
+          # (signed by the .exe.sig file alongside it).
+          publish "windows-x86_64" \
+            "$(ls artifacts/windows-x64/nsis/*.exe 2>/dev/null | head -1)" \
+            "$(ls artifacts/windows-x64/nsis/*.exe.sig 2>/dev/null | head -1)"
+
+          echo "✓ doc-api sync complete"
