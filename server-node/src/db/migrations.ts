@@ -77,6 +77,23 @@ export function applyMigrations(db: Database) {
       expires_at  TEXT NOT NULL
     );
 
+    -- 退款流水
+    CREATE TABLE IF NOT EXISTS refunds (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      out_refund_no   TEXT UNIQUE NOT NULL,
+      out_trade_no    TEXT NOT NULL,
+      license_key     TEXT,
+      amount          INTEGER NOT NULL,         -- 单位:分
+      reason          TEXT,
+      status          TEXT NOT NULL,            -- 'pending' | 'success' | 'failed' | 'closed' | 'processing'
+      refund_id       TEXT,                     -- 微信退款单号(平台返回)
+      raw_response    TEXT,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at      TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_refunds_trade ON refunds(out_trade_no);
+    CREATE INDEX IF NOT EXISTS idx_refunds_status ON refunds(status);
+
     -- 门户站访问日志(每次 doc-web 请求一条)
     CREATE TABLE IF NOT EXISTS portal_access (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -1,24 +1,27 @@
 /**
  * 微信支付 API v3 集成。
  *
- * 用 Native(扫码)支付。流程:
+ * 用 Native(扫码)支付 + 退款。流程:
  *
- *   1. 服务器调用 POST /v3/pay/transactions/native 拿到 code_url。
- *   2. 服务器把 code_url 渲染成二维码,用户用微信扫码完成支付。
- *   3. 微信支付通过 notify_url 回调通知服务器,回调内容用 AES-256-GCM
- *      加密 + 平台证书 RSA 签名。
- *   4. 服务器验签 → 解密 → 拿到 out_trade_no、transaction_id 等。
+ *   下单:
+ *     1. 调 POST /v3/pay/transactions/native 拿 code_url
+ *     2. 渲染二维码,用户用微信扫码完成支付
+ *     3. 微信回调 notify_url(AES-256-GCM 加密 + RSA 签名)
+ *     4. 验签 → 解密 → 拿到 trade_state 与 out_trade_no
  *
- * 所有需要的凭据来自商户后台:
+ *   退款:
+ *     1. 调 POST /v3/refund/domestic/refunds(签名同上)
+ *     2. 同步响应给出初始 status (SUCCESS / PROCESSING)
+ *     3. 异步结果通过单独的 refund notify_url 回调
+ *
+ * 凭据来自商户后台:
  *   - 商户号 mchid
- *   - 应用 AppID(公众号 / 小程序 / 服务号 与商户绑定后的)
- *   - API v3 密钥(32 字符,商户后台手动设置,AES key)
- *   - 商户 API 私钥 PEM(apiclient_key.pem,出请求时签名用)
- *   - 商户证书序列号(40 字符 hex,与私钥配对)
- *   - 微信支付平台证书 PEM(验证回调签名用)
- *
- * 注意:平台证书会定期轮换(~1 年),需要手动更新或调
- * GET /v3/certificates 自动获取。本实现要求手动维护。
+ *   - 应用 AppID
+ *   - API v3 密钥(32 字符,AES key)
+ *   - 商户 API 私钥 PEM(签名用)
+ *   - 商户证书序列号(40 字符 hex)
+ *   - 微信支付平台公钥 PEM 或证书 PEM(验证回调用)
+ *   - (可选)平台公钥 ID(Wechatpay-Serial 头校验)
  */
 
 import { createSign, createVerify, createDecipheriv, randomBytes } from "node:crypto";
@@ -26,10 +29,11 @@ import { createSign, createVerify, createDecipheriv, randomBytes } from "node:cr
 export interface WechatPayCreds {
   mchId: string;
   appId: string;
-  apiV3Key: string; // 32 chars (used as AES-256-GCM key)
-  privateKey: string; // PEM
-  certSerialNo: string; // 40-char hex
-  platformCert: string; // PEM (public cert from /v3/certificates)
+  apiV3Key: string;       // 32 chars (used as AES-256-GCM key)
+  privateKey: string;      // PEM
+  certSerialNo: string;    // 40-char hex
+  platformCert: string;    // PEM (public cert OR public key)
+  platformKeyId?: string;  // Optional: PUB_KEY_ID_xxx for new public-key scheme
   notifyUrl: string;
 }
 
@@ -98,8 +102,58 @@ export class WechatPay {
   }
 
   /**
+   * Apply for a refund against an existing transaction.
+   *
+   * POST /v3/refund/domestic/refunds
+   *
+   * Returns the parsed response. status is normally PROCESSING for
+   * non-instant cases — final state arrives via the refund notify_url
+   * callback. For some payment methods (small amounts to balance) it's
+   * SUCCESS immediately.
+   */
+  async createRefund(args: {
+    outTradeNo: string;
+    outRefundNo: string;
+    refundFen: number;
+    totalFen: number;
+    reason?: string;
+    notifyUrl?: string;
+  }): Promise<RefundResponse> {
+    const path = "/v3/refund/domestic/refunds";
+    const payload: Record<string, unknown> = {
+      out_trade_no: args.outTradeNo,
+      out_refund_no: args.outRefundNo,
+      amount: {
+        refund: args.refundFen,
+        total: args.totalFen,
+        currency: "CNY",
+      },
+    };
+    if (args.reason) payload.reason = args.reason;
+    if (args.notifyUrl) payload.notify_url = args.notifyUrl;
+    const body = JSON.stringify(payload);
+    const auth = this.signRequest("POST", path, body);
+    const resp = await fetch(`https://api.mch.weixin.qq.com${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: auth,
+        "User-Agent": "DocMind-Server/1.0",
+      },
+      body,
+    });
+    const text = await resp.text();
+    if (!resp.ok) {
+      throw new Error(`wechat refund failed: ${resp.status} ${text}`);
+    }
+    return JSON.parse(text) as RefundResponse;
+  }
+
+  /**
    * Verify a callback's RSA-SHA256 signature against the platform's
-   * public cert. Inputs come from the request headers.
+   * public cert (or public key PEM, both are accepted by Node's
+   * createVerify).
    *
    * Signing string: {timestamp}\n{nonce}\n{body}\n
    */
@@ -147,6 +201,30 @@ export class WechatPay {
   }
 }
 
+/** Subset of fields returned by /v3/refund/domestic/refunds. */
+export interface RefundResponse {
+  refund_id: string;
+  out_refund_no: string;
+  transaction_id: string;
+  out_trade_no: string;
+  channel: string;
+  user_received_account?: string;
+  success_time?: string;
+  create_time: string;
+  status: "SUCCESS" | "CLOSED" | "PROCESSING" | "ABNORMAL";
+  funds_account?: string;
+  amount: {
+    total: number;
+    refund: number;
+    payer_total: number;
+    payer_refund: number;
+    settlement_refund: number;
+    settlement_total: number;
+    discount_refund: number;
+    currency: string;
+  };
+}
+
 /** WeChat callback envelope (the JSON body POSTed to our notify_url). */
 export interface WechatCallbackEnvelope {
   id: string;
@@ -177,4 +255,17 @@ export interface WechatTransactionEvent {
   success_time: string;
   payer: { openid: string };
   amount: { total: number; payer_total: number; currency: string };
+}
+
+/** Decrypted resource for refund.success / refund.abnormal events. */
+export interface WechatRefundEvent {
+  mchid: string;
+  out_trade_no: string;
+  transaction_id: string;
+  out_refund_no: string;
+  refund_id: string;
+  refund_status: "SUCCESS" | "CLOSED" | "PROCESSING" | "ABNORMAL";
+  success_time?: string;
+  amount: { total: number; refund: number; payer_total: number; payer_refund: number };
+  user_received_account?: string;
 }

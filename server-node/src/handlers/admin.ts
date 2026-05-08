@@ -341,8 +341,10 @@ adminRouter.get("/orders", (c) => {
   const { db } = c.var.app;
   const rows = db
     .prepare(
-      `SELECT out_trade_no, amount, paid_at, payment_type, license_key
-         FROM orders ORDER BY created_at DESC LIMIT 200`,
+      `SELECT o.out_trade_no, o.amount, o.paid_at, o.payment_type, o.license_key,
+              (SELECT status FROM refunds r WHERE r.out_trade_no = o.out_trade_no
+                 ORDER BY r.created_at DESC LIMIT 1) AS refund_status
+         FROM orders o ORDER BY o.created_at DESC LIMIT 200`,
     )
     .all() as Array<{
     out_trade_no: string;
@@ -350,20 +352,226 @@ adminRouter.get("/orders", (c) => {
     paid_at: string | null;
     payment_type: string | null;
     license_key: string | null;
+    refund_status: string | null;
   }>;
   const tbody = rows
-    .map(
-      (o) =>
-        `<tr><td class="mono">${htmlEscape(o.out_trade_no)}</td><td class="mono">¥${(o.amount / 100).toFixed(2)}</td><td>${htmlEscape(formatDate(o.paid_at) ?? "未支付")}</td><td class="mono">${htmlEscape(o.license_key ?? "—")}</td><td>${htmlEscape(o.payment_type ?? "—")}</td></tr>`,
-    )
+    .map((o) => {
+      let actionCell = "";
+      if (o.paid_at && o.license_key && !o.refund_status) {
+        actionCell = `<a class="btn" href="/admin/orders/${encodeURIComponent(o.out_trade_no)}/refund" style="padding: 4px 10px; font-size: 11px;">退款</a>`;
+      } else if (o.refund_status) {
+        const chip =
+          o.refund_status === "success"
+            ? `<span class="chip" style="color:#dc2626; border-color:#fca5a5; background:rgba(239,68,68,0.08);">已退款</span>`
+            : o.refund_status === "processing" || o.refund_status === "pending"
+              ? `<span class="chip" style="color:#92400e; border-color:#fde68a; background:rgba(245,158,11,0.1);">退款中</span>`
+              : `<span class="chip">退款${htmlEscape(o.refund_status)}</span>`;
+        actionCell = chip;
+      } else if (!o.paid_at) {
+        actionCell = `<span class="chip chip-muted">待支付</span>`;
+      }
+      return `<tr>
+  <td class="mono">${htmlEscape(o.out_trade_no)}</td>
+  <td class="mono">¥${(o.amount / 100).toFixed(2)}</td>
+  <td>${htmlEscape(formatDate(o.paid_at) ?? "未支付")}</td>
+  <td class="mono">${htmlEscape(o.license_key ?? "—")}</td>
+  <td>${htmlEscape(o.payment_type ?? "—")}</td>
+  <td>${actionCell}</td>
+</tr>`;
+    })
     .join("");
   const body = `
 <h1>订单流水</h1>
+<div style="margin-bottom: 12px;">
+  <a class="btn" href="/admin/refunds">退款记录</a>
+</div>
 <table>
-  <thead><tr><th>订单号</th><th>金额</th><th>支付时间</th><th>License</th><th>支付方式</th></tr></thead>
+  <thead><tr><th>订单号</th><th>金额</th><th>支付时间</th><th>License</th><th>支付方式</th><th>操作</th></tr></thead>
   <tbody>${tbody}</tbody>
 </table>`;
   return c.html(layout("订单", body));
+});
+
+// 退款表单(GET)
+adminRouter.get("/orders/:out_trade_no/refund", (c) => {
+  const guard = requireSession(c);
+  if (guard !== true) return guard;
+  const { db } = c.var.app;
+  const outTradeNo = c.req.param("out_trade_no");
+  const order = db
+    .prepare(
+      `SELECT out_trade_no, amount, paid_at, license_key FROM orders WHERE out_trade_no = ?`,
+    )
+    .get(outTradeNo) as
+    | { out_trade_no: string; amount: number; paid_at: string | null; license_key: string | null }
+    | undefined;
+  if (!order) return c.text("order not found", 404);
+  if (!order.paid_at) return c.text("order is not paid yet", 400);
+
+  const existing = db
+    .prepare(
+      `SELECT out_refund_no, status FROM refunds WHERE out_trade_no = ? ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(outTradeNo) as { out_refund_no: string; status: string } | undefined;
+  const existingNote = existing
+    ? `<div class="alert alert-error" style="background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.3); color: #92400e;">
+         此订单已有退款记录(${htmlEscape(existing.out_refund_no)},状态 ${htmlEscape(existing.status)})。继续提交将会再触发一次微信退款 API,可能失败。
+       </div>`
+    : "";
+
+  const body = `
+<h1>退款</h1>
+${existingNote}
+<div class="card">
+  <h2>订单信息</h2>
+  <div>订单号: <span class="mono">${htmlEscape(order.out_trade_no)}</span></div>
+  <div>原始金额: <strong>¥${(order.amount / 100).toFixed(2)}</strong></div>
+  <div>支付时间: ${htmlEscape(formatDate(order.paid_at) ?? "—")}</div>
+  <div>License: <span class="mono">${htmlEscape(order.license_key ?? "—")}</span></div>
+</div>
+<div class="card">
+  <h2>退款金额 + 原因</h2>
+  <form method="POST" action="/admin/orders/${encodeURIComponent(order.out_trade_no)}/refund">
+    <label style="display:block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono); margin-bottom: 4px;">退款金额(分,默认全额)</label>
+    <input name="refund_fen" value="${order.amount}" type="number" min="1" max="${order.amount}" required style="width: 200px; margin-bottom: 12px;">
+    <label style="display:block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono); margin-bottom: 4px;">退款原因</label>
+    <input name="reason" placeholder="例如:推广期客户申请退款" style="width: 100%; max-width: 460px; margin-bottom: 16px;">
+    <p style="color: var(--text-secondary); font-size: 12px; line-height: 1.6; margin-bottom: 12px;">
+      ⚠️ 退款成功后,关联的 license 会被自动标记为 <span class="mono">REVOKED</span>,客户端激活校验时会拒绝。<br>
+      退款是异步的(尤其银行卡),通常 1-3 个工作日到账。
+    </p>
+    <button class="primary" type="submit">提交退款申请</button>
+    <a class="btn" href="/admin/orders" style="margin-left: 8px;">取消</a>
+  </form>
+</div>`;
+  return c.html(layout("退款", body));
+});
+
+// 退款提交(POST)— 调微信退款 API
+adminRouter.post("/orders/:out_trade_no/refund", async (c) => {
+  const guard = requireSession(c);
+  if (guard !== true) return guard;
+  const { db, config } = c.var.app;
+  const outTradeNo = c.req.param("out_trade_no");
+  const form = await c.req.formData();
+  const refundFen = parseInt(String(form.get("refund_fen") ?? "0"), 10);
+  const reason = String(form.get("reason") ?? "");
+
+  const order = db
+    .prepare(`SELECT amount, paid_at, license_key FROM orders WHERE out_trade_no = ?`)
+    .get(outTradeNo) as
+    | { amount: number; paid_at: string | null; license_key: string | null }
+    | undefined;
+  if (!order) return c.text("order not found", 404);
+  if (!order.paid_at) return c.text("order not paid", 400);
+  if (refundFen <= 0 || refundFen > order.amount) {
+    return c.text("invalid refund amount", 400);
+  }
+
+  const w = config.wechat;
+  if (!w.mchId || !w.privateKey) return c.text("wechat not configured", 500);
+
+  const outRefundNo = `R-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  // 先落库占位(防 webhook 提前到达找不到记录)
+  db.prepare(
+    `INSERT INTO refunds (out_refund_no, out_trade_no, license_key, amount, reason, status)
+     VALUES (?, ?, ?, ?, ?, 'pending')`,
+  ).run(outRefundNo, outTradeNo, order.license_key, refundFen, reason);
+
+  // 调微信退款 API
+  const { WechatPay } = await import("../wechatpay.js");
+  const wp = new WechatPay(w);
+  const refundNotifyUrl = `https://${config.domain}/api/v1/payment/wechat/refund_webhook`;
+  let resp;
+  try {
+    resp = await wp.createRefund({
+      outTradeNo,
+      outRefundNo,
+      refundFen,
+      totalFen: order.amount,
+      reason,
+      notifyUrl: refundNotifyUrl,
+    });
+  } catch (e) {
+    db.prepare(
+      `UPDATE refunds SET status = 'failed', raw_response = ?, updated_at = datetime('now') WHERE out_refund_no = ?`,
+    ).run(String(e), outRefundNo);
+    return c.text(`微信退款失败: ${(e as Error).message}`, 502);
+  }
+
+  const status = resp.status.toLowerCase();
+  db.prepare(
+    `UPDATE refunds
+        SET status = ?, refund_id = ?, raw_response = ?, updated_at = datetime('now')
+      WHERE out_refund_no = ?`,
+  ).run(status, resp.refund_id, JSON.stringify(resp), outRefundNo);
+
+  // 同步成功 → 立即吊销 license
+  if (status === "success" && order.license_key) {
+    db.prepare(
+      `UPDATE licenses
+          SET note = COALESCE(note, '') || 'REVOKED:refund:${outRefundNo}:' || datetime('now')
+        WHERE key = ? AND note NOT LIKE 'REVOKED%'`,
+    ).run(order.license_key);
+  }
+
+  return c.redirect("/admin/refunds");
+});
+
+// 退款列表
+adminRouter.get("/refunds", (c) => {
+  const guard = requireSession(c);
+  if (guard !== true) return guard;
+  const { db } = c.var.app;
+  const rows = db
+    .prepare(
+      `SELECT out_refund_no, out_trade_no, license_key, amount, reason,
+              status, refund_id, created_at, updated_at
+         FROM refunds ORDER BY created_at DESC LIMIT 200`,
+    )
+    .all() as Array<{
+    out_refund_no: string;
+    out_trade_no: string;
+    license_key: string | null;
+    amount: number;
+    reason: string | null;
+    status: string;
+    refund_id: string | null;
+    created_at: string;
+    updated_at: string | null;
+  }>;
+  const tbody = rows
+    .map((r) => {
+      const chip =
+        r.status === "success"
+          ? `<span class="chip" style="color:#15803d; border-color:#86efac; background:rgba(34,197,94,0.08);">已退款</span>`
+          : r.status === "processing" || r.status === "pending"
+            ? `<span class="chip" style="color:#92400e; border-color:#fde68a; background:rgba(245,158,11,0.1);">退款中</span>`
+            : r.status === "failed"
+              ? `<span class="chip" style="color:#dc2626; border-color:#fca5a5; background:rgba(239,68,68,0.08);">失败</span>`
+              : `<span class="chip">${htmlEscape(r.status)}</span>`;
+      return `<tr>
+  <td class="mono">${htmlEscape(r.out_refund_no)}</td>
+  <td class="mono"><a href="/admin/orders">${htmlEscape(r.out_trade_no)}</a></td>
+  <td class="mono">¥${(r.amount / 100).toFixed(2)}</td>
+  <td>${chip}</td>
+  <td class="mono">${htmlEscape(r.license_key ?? "—")}</td>
+  <td>${htmlEscape(r.reason ?? "—")}</td>
+  <td>${htmlEscape(formatDate(r.updated_at ?? r.created_at) ?? "—")}</td>
+</tr>`;
+    })
+    .join("");
+  const body = `
+<h1>退款记录</h1>
+<table>
+  <thead><tr><th>退款单号</th><th>原订单</th><th>金额</th><th>状态</th><th>License</th><th>原因</th><th>更新</th></tr></thead>
+  <tbody>${tbody || `<tr><td colspan="7" style="text-align:center; padding:20px;">暂无退款</td></tr>`}</tbody>
+</table>
+<p style="margin-top: 16px; font-size: 11px; color: var(--text-muted); line-height: 1.7;">
+  退款成功后关联 license 会被标记 REVOKED,客户端再次激活会被拒绝。<br>
+  退款异步处理时间通常 1-3 个工作日,微信会通过 webhook 通知最终状态。
+</p>`;
+  return c.html(layout("退款", body));
 });
 
 // ── Downloads ──────────────────────────────────────────────────────────────

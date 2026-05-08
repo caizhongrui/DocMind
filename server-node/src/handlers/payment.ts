@@ -27,6 +27,7 @@ import { randomTicket } from "../util.js";
 import {
   WechatPay,
   type WechatCallbackEnvelope,
+  type WechatRefundEvent,
   type WechatTransactionEvent,
 } from "../wechatpay.js";
 
@@ -183,6 +184,76 @@ paymentRouter.post("/wechat/webhook", async (c) => {
   );
 
   console.log(`[wechat] license ${newKey} issued for order ${outTradeNo}`);
+  return c.json({ code: "SUCCESS", message: "ok" });
+});
+
+// ── /api/v1/payment/wechat/refund_webhook ─────────────────────────────────
+paymentRouter.post("/wechat/refund_webhook", async (c) => {
+  const { config, db } = c.var.app;
+  const w = config.wechat;
+  if (!w.platformCert || !w.apiV3Key) {
+    return c.json({ code: "FAIL", message: "server not configured" }, 500);
+  }
+
+  const timestamp = c.req.header("Wechatpay-Timestamp") ?? "";
+  const nonce = c.req.header("Wechatpay-Nonce") ?? "";
+  const signature = c.req.header("Wechatpay-Signature") ?? "";
+  const serial = c.req.header("Wechatpay-Serial") ?? "";
+  const rawBody = await c.req.text();
+
+  if (w.platformKeyId && serial && serial !== w.platformKeyId) {
+    return c.json({ code: "FAIL", message: "serial mismatch" }, 401);
+  }
+
+  const wp = new WechatPay(w);
+  if (!wp.verifyCallback({ timestamp, nonce, body: rawBody, signature })) {
+    return c.json({ code: "FAIL", message: "signature invalid" }, 401);
+  }
+
+  let envelope: WechatCallbackEnvelope;
+  try { envelope = JSON.parse(rawBody); }
+  catch { return c.json({ code: "FAIL", message: "bad envelope" }, 400); }
+
+  let plaintext: string;
+  try {
+    plaintext = wp.decryptResource({
+      ciphertext: envelope.resource.ciphertext,
+      associatedData: envelope.resource.associated_data,
+      nonce: envelope.resource.nonce,
+    });
+  } catch {
+    return c.json({ code: "FAIL", message: "decrypt failed" }, 400);
+  }
+
+  let event: WechatRefundEvent;
+  try { event = JSON.parse(plaintext); }
+  catch { return c.json({ code: "FAIL", message: "bad event" }, 400); }
+
+  const status = event.refund_status.toLowerCase();
+  db.prepare(
+    `UPDATE refunds
+        SET status = ?,
+            refund_id = COALESCE(refund_id, ?),
+            raw_response = ?,
+            updated_at = datetime('now')
+      WHERE out_refund_no = ?`,
+  ).run(status, event.refund_id, plaintext, event.out_refund_no);
+
+  // 退款成功 → 把对应 license 标记 REVOKED
+  if (status === "success") {
+    const r = db
+      .prepare(`SELECT license_key FROM refunds WHERE out_refund_no = ?`)
+      .get(event.out_refund_no) as { license_key: string | null } | undefined;
+    if (r?.license_key) {
+      db.prepare(
+        `UPDATE licenses
+            SET note = COALESCE(note, '') || 'REVOKED:refund:${event.out_refund_no}:' || datetime('now')
+          WHERE key = ? AND note NOT LIKE 'REVOKED%'`,
+      ).run(r.license_key);
+    }
+  }
+
+  console.log(`[wechat] refund webhook ${event.out_refund_no} → ${status}`);
   return c.json({ code: "SUCCESS", message: "ok" });
 });
 
