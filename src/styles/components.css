@@ -41,6 +41,39 @@
 .chip-muted {
   color: var(--color-text-muted);
 }
+/* ── License-state chips ───────────────────────────────────────────
+   Free   → default .chip (gray, neutral)
+   Trial  → amber (urgency, time-limited)
+   Pro    → gold (premium, paid)
+   Each fills the chip with a tinted background + matching foreground +
+   stronger weight so the three states are visually distinct at a glance. */
+.chip-trial {
+  color: #d97706;            /* amber-600 — readable on light */
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.14);
+  font-weight: 600;
+}
+.chip-pro {
+  color: #92400e;            /* warm amber-900 on light */
+  border-color: #f59e0b;
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.32) 0%, rgba(245, 158, 11, 0.20) 100%);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.4);
+}
+:root[data-theme="dark"] .chip-trial,
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .chip-trial {
+    color: #fbbf24;
+  }
+}
+:root[data-theme="dark"] .chip-pro,
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .chip-pro {
+    color: #fde68a;
+    box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.55);
+  }
+}
 
 /* ── Section label (tiny mono uppercase) ── */
 .section-label {

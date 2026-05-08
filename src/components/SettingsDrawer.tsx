@@ -650,12 +650,11 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
                   </Typography.Text>
                   {isProGroup && (
                     <span
-                      className="chip chip-primary"
+                      className="chip chip-pro"
                       style={{
                         height: 16,
                         padding: "0 6px",
                         fontSize: 9,
-                        letterSpacing: "0.04em",
                         textTransform: "uppercase",
                       }}
                     >

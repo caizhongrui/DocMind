@@ -59,13 +59,12 @@ export default function LicenseStatusBar() {
           }
         >
           <button
-            className="chip chip-primary"
+            className="chip chip-pro"
             style={{
               height: 22,
               padding: "0 8px",
               cursor: "pointer",
               fontFamily: "inherit",
-              border: "1px solid var(--color-primary)",
             }}
           >
             <CrownOutlined style={{ fontSize: 11 }} />
@@ -82,13 +81,12 @@ export default function LicenseStatusBar() {
       <Tooltip title="点击购买 Pro 永久解锁">
         <button
           onClick={() => showUpgrade("trial_promo")}
-          className="chip chip-primary"
+          className="chip chip-trial"
           style={{
             height: 22,
             padding: "0 8px",
             cursor: "pointer",
             fontFamily: "inherit",
-            border: "1px solid var(--color-primary)",
           }}
         >
           <CrownOutlined style={{ fontSize: 11 }} />
@@ -115,12 +113,23 @@ export default function LicenseStatusBar() {
     >
       <button
         onClick={() => showUpgrade("free_promo")}
-        className={lowQuota ? "chip chip-primary" : "chip"}
+        className="chip"
         style={{
           height: 22,
           padding: "0 8px",
           cursor: "pointer",
           fontFamily: "inherit",
+          // Low-quota → red border to flag urgency, distinct from
+          // the Trial (amber) and Pro (gold) chips so plan and
+          // quota stay decoupled visually.
+          ...(lowQuota
+            ? {
+                color: "#dc2626",
+                borderColor: "#dc2626",
+                background: "rgba(239, 68, 68, 0.10)",
+                fontWeight: 600,
+              }
+            : {}),
         }}
       >
         Free · <span className="mono">{used}/{limit}</span>
