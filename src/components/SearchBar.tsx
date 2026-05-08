@@ -45,7 +45,7 @@ export default function SearchBar({ modelAvailable }: { modelAvailable: boolean 
     return () => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
-  }, [query, doSearch]);
+  }, [query, mode, doSearch]);
 
   const handleSearch = async () => {
     await doSearch();
