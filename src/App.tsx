@@ -487,9 +487,9 @@ export default function App() {
         }
         open={qaOpen}
         onClose={() => setQaOpen(false)}
-        width={520}
         forceRender
         styles={{
+          wrapper: { width: 520 },
           header: { borderBottom: "1px solid var(--color-border)", paddingBottom: 12 },
           body: { display: "flex", flexDirection: "column", height: "100%", padding: 16, background: "var(--color-bg)" },
         }}
@@ -506,8 +506,8 @@ export default function App() {
         }
         open={modelOpen}
         onClose={() => setModelOpen(false)}
-        width={600}
         forceRender
+        styles={{ wrapper: { width: 600 } }}
       >
         <ModelManager
           onModelReady={() => {
