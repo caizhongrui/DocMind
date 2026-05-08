@@ -207,7 +207,7 @@ export default function ModelManager({
       <Alert
         type="info"
         showIcon
-        message="关于语义搜索"
+        title="关于语义搜索"
         description="使用 bge-small-zh-v1.5 本地 AI 模型，能理解自然语言含义，比全文搜索更智能。模型约 100MB，下载后完全本地运行，不联网。"
         style={{ marginBottom: 16, borderRadius: 8 }}
       />
@@ -216,7 +216,7 @@ export default function ModelManager({
       {error && (
         <Alert
           type="error"
-          message="下载失败"
+          title="下载失败"
           description={error}
           showIcon
           closable
@@ -270,7 +270,7 @@ export default function ModelManager({
         <Alert
           type="warning"
           showIcon
-          message="模型已就绪，但还没有语义索引"
+          title="模型已就绪，但还没有语义索引"
           description={
             <>
               需要重新索引文档才能使用语义搜索。请到
@@ -284,7 +284,7 @@ export default function ModelManager({
         <Alert
           type="success"
           showIcon
-          message={`模型已就绪，已索引 ${status.embedding_count.toLocaleString()} 个文本块`}
+          title={`模型已就绪，已索引 ${status.embedding_count.toLocaleString()} 个文本块`}
           description="回到主界面，搜索栏选择「语义」模式即可使用 AI 语义搜索。"
           style={{ borderRadius: 8 }}
         />

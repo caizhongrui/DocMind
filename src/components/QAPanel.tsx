@@ -4,7 +4,6 @@ import {
   Spin,
   Typography,
   Progress,
-  List,
   Space,
   Switch,
   Tooltip,
@@ -403,36 +402,57 @@ export default function QAPanel() {
               <div className="section-label" style={{ marginBottom: 10 }}>
                 Choose a Model
               </div>
-              <List
-                size="small"
-                dataSource={models}
-                split={false}
-                footer={
-                  <Button
-                    type="dashed"
-                    size="small"
-                    block
-                    icon={<ImportOutlined />}
-                    onClick={handleImportGguf}
-                    loading={loadingModel === "custom"}
-                    style={{ borderRadius: 6, fontSize: 12, color: "var(--color-text-secondary)" }}
-                  >
-                    导入本地 GGUF 文件
-                  </Button>
-                }
-                renderItem={(m) => (
-                  <List.Item
+              <div>
+                {models.map((m) => (
+                  <div
+                    key={m.id}
                     style={{
                       padding: "8px 10px",
                       borderRadius: 6,
                       marginBottom: 4,
                       background: m.downloaded ? "var(--color-surface-elevated)" : "transparent",
                       border: "1px solid var(--color-border)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
                     }}
-                    actions={[
-                      m.downloaded ? (
+                  >
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 13, color: "var(--color-text)", fontWeight: 500 }}>{m.name}</span>
+                        {MODEL_META[m.id]?.tag && (
+                          <span className="chip" style={{ height: 16 }}>
+                            {MODEL_META[m.id].tag}
+                          </span>
+                        )}
+                        {m.downloaded && (
+                          <span className="chip chip-primary" style={{ height: 16 }}>
+                            已下载
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ marginTop: 2 }}>
+                        {MODEL_META[m.id]?.desc && (
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: "var(--color-text-secondary)",
+                              lineHeight: 1.5,
+                              marginBottom: 3,
+                            }}
+                          >
+                            {MODEL_META[m.id].desc}
+                          </div>
+                        )}
+                        <Typography.Text type="secondary" className="mono" style={{ fontSize: 11 }}>
+                          {m.size_mb >= 1000 ? `${(m.size_mb / 1024).toFixed(1)} GB` : `${m.size_mb} MB`}
+                        </Typography.Text>
+                      </div>
+                    </div>
+                    <div style={{ flexShrink: 0 }}>
+                      {m.downloaded ? (
                         <Button
-                          key="load"
                           size="small"
                           type="primary"
                           ghost={loadedModel === m.id}
@@ -444,7 +464,7 @@ export default function QAPanel() {
                           {loadedModel === m.id ? "已加载" : "加载"}
                         </Button>
                       ) : downloadingModel === m.id ? (
-                        <Space key="dl">
+                        <Space>
                           <Progress percent={downloadProgress} size="small" style={{ width: 70 }} showInfo={false} />
                           <Typography.Text type="secondary" className="mono" style={{ fontSize: 11 }}>
                             {downloadProgress}%
@@ -452,7 +472,6 @@ export default function QAPanel() {
                         </Space>
                       ) : (
                         <Button
-                          key="download"
                           size="small"
                           icon={<DownloadOutlined />}
                           onClick={() => handleDownload(m)}
@@ -461,48 +480,22 @@ export default function QAPanel() {
                         >
                           下载
                         </Button>
-                      ),
-                    ]}
-                  >
-                    <List.Item.Meta
-                      title={
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 13, color: "var(--color-text)", fontWeight: 500 }}>{m.name}</span>
-                          {MODEL_META[m.id]?.tag && (
-                            <span className="chip" style={{ height: 16 }}>
-                              {MODEL_META[m.id].tag}
-                            </span>
-                          )}
-                          {m.downloaded && (
-                            <span className="chip chip-primary" style={{ height: 16 }}>
-                              已下载
-                            </span>
-                          )}
-                        </div>
-                      }
-                      description={
-                        <div style={{ marginTop: 2 }}>
-                          {MODEL_META[m.id]?.desc && (
-                            <div
-                              style={{
-                                fontSize: 11,
-                                color: "var(--color-text-secondary)",
-                                lineHeight: 1.5,
-                                marginBottom: 3,
-                              }}
-                            >
-                              {MODEL_META[m.id].desc}
-                            </div>
-                          )}
-                          <Typography.Text type="secondary" className="mono" style={{ fontSize: 11 }}>
-                            {m.size_mb >= 1000 ? `${(m.size_mb / 1024).toFixed(1)} GB` : `${m.size_mb} MB`}
-                          </Typography.Text>
-                        </div>
-                      }
-                    />
-                  </List.Item>
-                )}
-              />
+                      )}
+                    </div>
+                  </div>
+                ))}
+                <Button
+                  type="dashed"
+                  size="small"
+                  block
+                  icon={<ImportOutlined />}
+                  onClick={handleImportGguf}
+                  loading={loadingModel === "custom"}
+                  style={{ borderRadius: 6, fontSize: 12, color: "var(--color-text-secondary)", marginTop: 4 }}
+                >
+                  导入本地 GGUF 文件
+                </Button>
+              </div>
             </div>
           )}
 

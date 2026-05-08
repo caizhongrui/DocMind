@@ -134,8 +134,8 @@ export default function HelpDrawer({ open, onClose, onStartTour }: Props) {
       }
       open={open}
       onClose={onClose}
-      width={480}
       styles={{
+        wrapper: { width: 480 },
         body: { padding: "20px 24px", background: "var(--color-bg)" },
         header: { borderBottom: "1px solid var(--color-border)" },
       }}

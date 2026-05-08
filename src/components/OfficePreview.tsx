@@ -190,7 +190,7 @@ export default function OfficePreview({ path, fileType }: Props) {
     return (
       <Alert
         type="error"
-        message="预览失败"
+        title="预览失败"
         description={error}
         showIcon
         style={{ margin: 12 }}

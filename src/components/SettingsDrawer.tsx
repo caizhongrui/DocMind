@@ -1,4 +1,4 @@
-import { Drawer, Button, List, Typography, Progress, message, Modal, Statistic, InputNumber } from "antd";
+import { Drawer, Button, Typography, Progress, message, Modal, Statistic, InputNumber, Space } from "antd";
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -423,8 +423,8 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
       }
       open={drawerOpen}
       onClose={onClose}
-      width={480}
       styles={{
+        wrapper: { width: 480 },
         body: { padding: "20px 24px", background: "var(--color-bg)" },
         header: { borderBottom: "1px solid var(--color-border)" },
       }}
@@ -528,36 +528,18 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
               暂未添加文件夹，点击下方按钮或拖拽文件夹到此处
             </div>
           ) : (
-            <List
-              dataSource={folders}
-              renderItem={(folder) => (
-                <List.Item
-                  style={{ padding: "10px 16px" }}
-                  actions={[
-                    <Button
-                      key="reindex"
-                      type="text"
-                      size="small"
-                      icon={<ReloadOutlined />}
-                      loading={indexing === folder}
-                      onClick={() => reindex(folder)}
-                      style={{ fontSize: 12, color: "var(--color-text-secondary)" }}
-                    >
-                      重新索引
-                    </Button>,
-                    <Button
-                      key="remove"
-                      type="text"
-                      size="small"
-                      danger
-                      icon={<DeleteOutlined />}
-                      disabled={indexing !== null}
-                      onClick={() => removeFolder(folder)}
-                      style={{ fontSize: 12 }}
-                    >
-                      移除
-                    </Button>,
-                  ]}
+            <div>
+              {folders.map((folder, idx) => (
+                <div
+                  key={folder}
+                  style={{
+                    padding: "10px 16px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    borderTop: idx === 0 ? undefined : "1px solid var(--color-border)",
+                  }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
                     <FolderOutlined style={{ color: "var(--color-text-secondary)", fontSize: 14, flexShrink: 0 }} />
@@ -569,9 +551,32 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
                       {folder}
                     </Typography.Text>
                   </div>
-                </List.Item>
-              )}
-            />
+                  <Space size={4}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      loading={indexing === folder}
+                      onClick={() => reindex(folder)}
+                      style={{ fontSize: 12, color: "var(--color-text-secondary)" }}
+                    >
+                      重新索引
+                    </Button>
+                    <Button
+                      type="text"
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      disabled={indexing !== null}
+                      onClick={() => removeFolder(folder)}
+                      style={{ fontSize: 12 }}
+                    >
+                      移除
+                    </Button>
+                  </Space>
+                </div>
+              ))}
+            </div>
           )}
         </div>
 
