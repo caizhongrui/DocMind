@@ -88,3 +88,38 @@ export async function invokePro<T>(cmd: string, args?: Record<string, unknown>):
     throw err;
   }
 }
+
+/**
+ * Map backend error strings (e.g. "PRO_REQUIRED:model_tier") to a
+ * user-facing Chinese message. Unknown errors are returned as-is so we
+ * still surface something rather than swallowing them silently.
+ */
+const PRO_REQUIRED_MESSAGES: Record<string, string> = {
+  custom_gguf: "导入自定义模型是 Pro 功能,请升级或试用",
+  model_tier: "该模型档位需要 Pro,免费版仅支持 0.6B 轻量模型",
+  batch_summary: "批量摘要是 Pro 功能,请升级或试用",
+  ocr_indexing: "OCR / 扫描件索引是 Pro 功能,请升级或试用",
+  conversation_export: "导出对话是 Pro 功能,请升级或试用",
+  scheduled_reindex: "定时重索引是 Pro 功能,请升级或试用",
+};
+
+export function localizeError(err: unknown): string {
+  const msg = String(err);
+  if (msg.startsWith("PRO_REQUIRED:")) {
+    const reason = msg.slice("PRO_REQUIRED:".length);
+    return PRO_REQUIRED_MESSAGES[reason] ?? `该功能需要 Pro 版本: ${reason}`;
+  }
+  if (msg.startsWith("QUOTA_EXCEEDED:")) {
+    return "本月免费 AI 调用配额已用完";
+  }
+  if (msg === "FINGERPRINT_MISMATCH") {
+    return "License 绑定的设备指纹与本机不符,无法激活";
+  }
+  if (msg === "EXPIRED_TOKEN") {
+    return "License token 已过期";
+  }
+  if (msg.startsWith("INVALID_TOKEN:")) {
+    return `License token 无效: ${msg.slice("INVALID_TOKEN:".length)}`;
+  }
+  return msg.replace(/^Error:\s*/, "");
+}

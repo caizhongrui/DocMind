@@ -30,7 +30,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { useState, useEffect, useRef } from "react";
 import type { SourceRef, Message, GgufModelInfo } from "../types";
-import { invokePro } from "../stores/licenseStore";
+import { invokePro, localizeError } from "../stores/licenseStore";
 
 interface DownloadProgress {
   model_id: string;
@@ -121,7 +121,11 @@ export default function QAPanel() {
     autoLoadedRef.current = true;
     const modelId = resolveModelId(savedPath, modelList);
     setLoadingModel(modelId);
-    invoke("load_llm_model", { path: savedPath }).catch(() => {
+    // invokePro routes PRO_REQUIRED:* to the upgrade dialog. We swallow
+    // the error here (already shown by the dialog) and forget the saved
+    // path so the next launch falls back to picking a model the user has
+    // permission for.
+    invokePro("load_llm_model", { path: savedPath }).catch(() => {
       autoLoadedRef.current = false;
       setLoadingModel(null);
       localStorage.removeItem(LAST_MODEL_KEY);
@@ -160,12 +164,12 @@ export default function QAPanel() {
           },
         ];
       });
-      await invoke("load_llm_model", { path: destPath });
+      await invokePro("load_llm_model", { path: destPath });
     } catch (e) {
       setLoadingModel(null);
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: `导入失败: ${String(e)}`, error: true },
+        { role: "assistant", content: `导入失败: ${localizeError(e)}`, error: true },
       ]);
     }
   };
@@ -304,10 +308,10 @@ export default function QAPanel() {
   const handleLoad = (model: GgufModelInfo) => {
     if (!model.path) return;
     setLoadingModel(model.id);
-    invoke("load_llm_model", { path: model.path }).catch((e: unknown) => {
+    invokePro("load_llm_model", { path: model.path }).catch((e: unknown) => {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: `加载失败: ${String(e)}`, error: true },
+        { role: "assistant", content: `加载失败: ${localizeError(e)}`, error: true },
       ]);
       setLoadingModel(null);
     });
