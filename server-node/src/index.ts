@@ -12,6 +12,7 @@
  */
 
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { config } from "./config.js";
@@ -117,6 +118,18 @@ async function main() {
     if (res) return res;
     return c.text("Not Found", 404);
   });
+
+  // CORS for cross-origin clients (Tauri webview is `tauri://localhost`
+  // on macOS / `https://tauri.localhost` on Windows). These endpoints are
+  // uncredentialed (no cookies), so a permissive Origin echo is safe.
+  const apiCors = cors({
+    origin: (origin) => origin ?? "*",
+    allowMethods: ["GET", "POST", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+    maxAge: 600,
+  });
+  app.use("/api/*", apiCors);
+  app.use("/releases/*", apiCors);
 
   // API surface (mounted unconditionally — the portal middleware above
   // short-circuits doc-web requests before they reach here).
