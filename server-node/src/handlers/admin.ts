@@ -234,11 +234,23 @@ adminRouter.get("/licenses/issue", (c) => {
   const body = `
 <h1>手动签发 License</h1>
 <div class="card">
+  <p style="font-size: 13px; line-height: 1.7; color: var(--text-secondary); margin: 0 0 14px;">
+    License 一经签出即与硬件指纹绑定。把客户在客户端"升级 → 离线激活"页面里看到的指纹粘贴到这里,就能直接拿到一段已签名的 token JSON 发给客户使用。<br>
+    <span style="color: var(--text-muted);">指纹留空时只生成一个未绑定的 key,后续可在「License 列表 → 离线激活」中补签 token。</span>
+  </p>
   <form method="POST" action="/admin/licenses/issue">
     <label style="display: block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono);">买家邮箱(可选,用于备注)</label>
-    <input name="email" style="width: 100%; max-width: 360px; margin: 4px 0 12px;">
+    <input name="email" style="width: 100%; max-width: 460px; margin: 4px 0 12px;">
+
     <label style="display: block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono);">备注</label>
-    <input name="note" style="width: 100%; max-width: 360px; margin: 4px 0 12px;" placeholder="例如:微信好友直转 / 退款重发 / 测试">
+    <input name="note" style="width: 100%; max-width: 460px; margin: 4px 0 12px;" placeholder="例如:微信好友直转 / 退款重发 / 测试">
+
+    <label style="display: block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono);">客户端硬件指纹(32 位 hex,留空则只生成 key 不签 token)</label>
+    <input name="fingerprint" class="mono" placeholder="例如 71f39bea191cee7fff2c4d3f757aec98" style="width: 100%; max-width: 460px; margin: 4px 0 12px;">
+
+    <label style="display: block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono);">机器标签(可选,便于识别)</label>
+    <input name="machine_label" placeholder="例如:张三的 MacBook Pro" style="width: 100%; max-width: 460px; margin: 4px 0 16px;">
+
     <button class="primary" type="submit">生成 License Key</button>
   </form>
 </div>`;
@@ -248,15 +260,25 @@ adminRouter.get("/licenses/issue", (c) => {
 adminRouter.post("/licenses/issue", async (c) => {
   const guard = requireSession(c);
   if (guard !== true) return guard;
-  const { db } = c.var.app;
+  const { db, signingKey } = c.var.app;
   const form = await c.req.formData();
   const email = String(form.get("email") ?? "");
   const note = String(form.get("note") ?? "");
+  const fingerprint = String(form.get("fingerprint") ?? "").trim().toLowerCase();
+  const machineLabel = String(form.get("machine_label") ?? "");
+
+  if (fingerprint && fingerprint.length < 16) {
+    return c.text("fingerprint too short — expected 32 hex chars", 400);
+  }
+
   const key = generateKey();
   db.prepare(
     `INSERT INTO licenses (key, plan, buyer_email, note) VALUES (?, 'lifetime', ?, ?)`,
   ).run(key, email || null, note || null);
-  const body = `
+
+  // No fingerprint → original behavior: just hand back the key.
+  if (!fingerprint) {
+    const body = `
 <h1>已签发</h1>
 <div class="card">
   <div class="alert alert-success">已生成新 License Key。请发给客户。</div>
@@ -264,7 +286,41 @@ adminRouter.post("/licenses/issue", async (c) => {
   <div style="margin-top: 16px;">
     <a class="btn" href="/admin/licenses/${encodeURIComponent(key)}">查看详情</a>
     <a class="btn" href="/admin/licenses/issue">再签一个</a>
-    <a class="btn" href="/admin/licenses/offline?key=${encodeURIComponent(key)}">离线激活(签 token)</a>
+    <a class="btn" href="/admin/licenses/offline?key=${encodeURIComponent(key)}">补签离线 Token</a>
+  </div>
+</div>`;
+    return c.html(layout("已签发", body));
+  }
+
+  // Fingerprint provided → bind and sign a token in one shot.
+  db.prepare(
+    `UPDATE licenses
+        SET bound_fingerprint = ?, bound_at = datetime('now'), machine_label = ?
+      WHERE key = ?`,
+  ).run(fingerprint, machineLabel, key);
+
+  const issuedAt = new Date();
+  const { signToken } = await import("../license/sign.js");
+  const tokenJson = await signToken(signingKey.privateKey, {
+    key,
+    plan: "lifetime",
+    fingerprint,
+    issuedAt,
+    expiresAt: null,
+  });
+
+  const body = `
+<h1>已签发(含离线 Token)</h1>
+<div class="card">
+  <div class="alert alert-success">License Key 已生成并绑定指纹 ${htmlEscape(fingerprint)}。</div>
+  <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); margin: 16px 0 6px;">License Key</div>
+  <div class="mono" style="font-size: 16px; padding: 10px 12px; background: var(--surface-elevated); border-radius: 8px;">${htmlEscape(key)}</div>
+  <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); margin: 16px 0 6px;">Token JSON(整段复制发给客户)</div>
+  <textarea id="tok" readonly style="width: 100%; min-height: 200px; font-family: var(--font-mono); font-size: 11px;">${htmlEscape(tokenJson)}</textarea>
+  <div style="display:flex; gap: 8px; margin-top: 10px;">
+    <button class="primary" onclick="navigator.clipboard.writeText(document.getElementById('tok').value).then(() => alert('已复制'))">复制 Token</button>
+    <a class="btn" href="/admin/licenses/${encodeURIComponent(key)}">查看 license 详情</a>
+    <a class="btn" href="/admin/licenses/issue">再签一个</a>
   </div>
 </div>`;
   return c.html(layout("已签发", body));
