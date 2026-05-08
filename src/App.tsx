@@ -19,6 +19,9 @@ import SettingsDrawer from "./components/SettingsDrawer";
 import ModelManager from "./pages/ModelManager";
 import QAPanel from "./components/QAPanel";
 import HelpDrawer from "./components/HelpDrawer";
+import LicenseStatusBar from "./components/LicenseStatusBar";
+import UpgradeDialog from "./components/UpgradeDialog";
+import { useLicenseStore } from "./stores/licenseStore";
 
 const { Header } = Layout;
 
@@ -52,6 +55,14 @@ export default function App() {
   const [embeddingCount, setEmbeddingCount] = useState(0);
   const [embedProgress, setEmbedProgress] = useState<EmbedProgress | null>(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+
+  // License store: refresh on mount and start listening for backend events.
+  const refreshLicense = useLicenseStore((s) => s.refresh);
+  const initLicenseListeners = useLicenseStore((s) => s.initListeners);
+  useEffect(() => {
+    refreshLicense();
+    initLicenseListeners();
+  }, [refreshLicense, initLicenseListeners]);
 
   const [siderWidth, setSiderWidth] = useState(() => {
     const saved = localStorage.getItem(SIDER_WIDTH_KEY);
@@ -307,6 +318,11 @@ export default function App() {
 
           <SearchBar modelAvailable={modelAvailable} />
 
+          {/* License status pill */}
+          <div style={{ flexShrink: 0 }}>
+            <LicenseStatusBar />
+          </div>
+
           {/* 工具栏按钮组 */}
           <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
             {/* Embedding 进度指示 */}
@@ -503,6 +519,9 @@ export default function App() {
           }}
         />
       </Drawer>
+
+      {/* Global upgrade prompt — opens whenever a Pro feature is gated */}
+      <UpgradeDialog />
     </>
   );
 }

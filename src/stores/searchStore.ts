@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { invokePro } from "./licenseStore";
 import type { SearchResult, SearchHistoryItem } from "../types";
 
 interface SearchStore {
@@ -40,7 +41,8 @@ export const useSearchStore = create<SearchStore>((set, get) => ({
     try {
       // 注意：后端命令名是 search_files，不是 search
       const { sortBy } = get();
-      const results = await invoke<SearchResult[]>("search_files", { query, mode, sortBy: sortBy === "relevance" ? null : sortBy });
+      // Use invokePro so semantic-search quota errors trigger the upgrade dialog.
+      const results = await invokePro<SearchResult[]>("search_files", { query, mode, sortBy: sortBy === "relevance" ? null : sortBy });
       set({ results, error: null });
       get().addToHistory(query.trim(), mode);
     } catch (e) {

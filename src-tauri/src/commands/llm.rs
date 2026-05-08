@@ -254,6 +254,26 @@ pub fn load_llm_model(path: String, app: AppHandle) -> Result<(), String> {
         return Err(format!("文件不存在: {path}"));
     }
 
+    // ── Gate 2: license-aware model tier check (synchronous, before we
+    //     spawn the background loader). Custom GGUF and Pro-tier built-ins
+    //     are blocked here for Free / Trial-expired users. ──
+    {
+        let state = app.state::<AppState>();
+        let lic = state
+            .license
+            .read()
+            .map_err(|e| format!("license lock: {e}"))?
+            .clone();
+        let tier = crate::license::gates::classify_model_path(Path::new(&path));
+        if !crate::license::gates::is_model_allowed(tier, &lic) {
+            let reason = match tier {
+                crate::license::gates::ModelTier::Custom => "custom_gguf",
+                _ => "model_tier",
+            };
+            return Err(crate::license::gates::pro_required(reason));
+        }
+    }
+
     // 立即返回，实际加载在后台线程完成
     std::thread::spawn(move || {
         let state = app.state::<AppState>();
@@ -311,6 +331,9 @@ pub fn ask_question(
     question: String,
     state: State<'_, AppState>,
 ) -> Result<AskResponse, String> {
+    // Free-tier monthly quota check (no-op for Trial / Pro).
+    crate::commands::license::consume_ai_quota(&state)?;
+
     // 1. 混合检索：chunk 上限根据已加载模型的参数量自适应
     let max_chunks = {
         let guard = state.llm.lock().map_err(|_| "llm lock poisoned".to_string())?;
@@ -395,6 +418,9 @@ pub fn ask_question_stream(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<Vec<SourceRef>, String> {
+    // Free-tier monthly quota check (no-op for Trial / Pro).
+    crate::commands::license::consume_ai_quota(&state)?;
+
     // 1. 混合检索（快速，同步完成）
     // 多轮对话时，将上一轮用户问题拼入检索词，保留实体/上下文信息
     // 例如：上轮"东方雨虹的项目有多少"，本轮"每个项目的价格"
@@ -488,6 +514,12 @@ pub fn ask_question_stream(
 /// 导入本地 GGUF 模型文件（将文件复制到 models 目录）
 #[tauri::command]
 pub async fn import_custom_gguf(path: String, app: AppHandle) -> Result<String, String> {
+    // Gate 4: Pro-only command.
+    {
+        let state = app.state::<AppState>();
+        crate::commands::license::require_pro(&state, "custom_gguf")?;
+    }
+
     let src = std::path::Path::new(&path);
     if !src.exists() {
         return Err(format!("文件不存在: {path}"));
@@ -571,6 +603,9 @@ pub fn summarize_documents(
     state: tauri::State<'_, crate::state::AppState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
+    // Gate 4: Pro-only command.
+    crate::commands::license::require_pro(&state, "batch_summary")?;
+
     use crate::indexer::parser::parse_file;
 
     let mut context_parts: Vec<String> = Vec::new();
@@ -645,6 +680,9 @@ pub async fn ask_question_stream_api(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<Vec<SourceRef>, String> {
+    // Free-tier monthly quota check (no-op for Trial / Pro).
+    crate::commands::license::consume_ai_quota(&state)?;
+
     // 读取 API 配置
     let config = {
         let guard = state.api_llm_config.read().map_err(|_| "api_llm_config lock poisoned".to_string())?;

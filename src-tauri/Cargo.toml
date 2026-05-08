@@ -47,6 +47,12 @@ tempfile = "3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff", "webp"] }
 pdfium-render = { version = "0.8", features = ["image", "thread_safe"] }
 
+# License & quota
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "alloc"] }
+sha2 = "0.10"
+hex = "0.4"
+machine-uid = "0.5"
+
 # macOS：fsevent 文件监听 + Metal GPU 加速（llama.cpp + ONNX）
 [target.'cfg(target_os = "macos")'.dependencies]
 notify = { version = "6", features = ["macos_fsevent"] }

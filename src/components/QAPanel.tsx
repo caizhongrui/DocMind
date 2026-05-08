@@ -30,6 +30,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { useState, useEffect, useRef } from "react";
 import type { SourceRef, Message, GgufModelInfo } from "../types";
+import { invokePro } from "../stores/licenseStore";
 
 interface DownloadProgress {
   model_id: string;
@@ -142,7 +143,7 @@ export default function QAPanel() {
     });
     if (!selected) return;
     try {
-      const destPath = await invoke<string>("import_custom_gguf", { path: selected as string });
+      const destPath = await invokePro<string>("import_custom_gguf", { path: selected as string });
       const filename = (destPath as string).split(/[\\/]/).pop() ?? "custom";
       setLoadingModel("custom");
       setModels((prev) => {
@@ -330,7 +331,7 @@ export default function QAPanel() {
     setInput("");
     setAsking(true);
 
-    invoke<SourceRef[]>("ask_question_stream", { question: q, history })
+    invokePro<SourceRef[]>("ask_question_stream", { question: q, history })
       .then((sources) => {
         setMessages((prev) => {
           const msgs = [...prev];

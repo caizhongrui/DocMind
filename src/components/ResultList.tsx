@@ -18,6 +18,7 @@ import {
 } from "@ant-design/icons";
 import { useSearchStore } from "../stores/searchStore";
 import { invoke } from "@tauri-apps/api/core";
+import { invokePro } from "../stores/licenseStore";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { HighlightText } from "../utils/highlight";
 import type { SearchResult } from "../types";
@@ -575,10 +576,12 @@ export default function ResultList() {
             onClick={async () => {
               const paths = filtered.filter((r) => selectedItems.has(r.file_id)).map((r) => r.path);
               try {
-                await invoke("summarize_documents", { paths });
+                await invokePro("summarize_documents", { paths });
                 message.info("摘要生成中，请打开「文档问答」面板查看结果");
               } catch (e) {
-                message.error(`摘要生成失败：${e}`);
+                const msg = String(e);
+                if (msg.startsWith("PRO_REQUIRED:")) return; // dialog already shown
+                message.error(`摘要生成失败：${msg}`);
               }
             }}
           >

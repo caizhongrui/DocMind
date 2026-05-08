@@ -1,4 +1,5 @@
 pub mod index;
+pub mod license;
 pub mod llm;
 pub mod model;
 pub mod search;

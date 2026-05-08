@@ -10,6 +10,10 @@ pub fn search_files(
     state: State<'_, AppState>,
 ) -> Result<Vec<search::SearchResult>, String> {
     let limit = limit.unwrap_or(50);
+    // Semantic search counts against the same monthly AI quota as Q&A.
+    if mode == "semantic" {
+        crate::commands::license::consume_ai_quota(&state)?;
+    }
     let mut results = match mode.as_str() {
         "filename" => search::search_filename(&query, &state, limit),
         "semantic" => search::search_semantic(&query, &state, limit),

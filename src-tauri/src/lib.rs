@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod embedder;
 mod indexer;
+mod license;
 mod llm;
 mod search;
 mod state;
@@ -205,6 +206,43 @@ pub fn run() {
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or_default();
 
+            // ── License bootstrap (Gate 1: read on-disk artifacts and decide
+            //     plan; ensures last_llm_path matches what the current plan
+            //     allows, so a Trial-expired user can't keep using a Pro
+            //     model that was loaded last session). ──
+            let license_state = license::state::bootstrap(&data_dir);
+            println!(
+                "[license] bootstrap: plan={:?} reason={} fp={}",
+                license_state.plan, license_state.reason, license_state.fingerprint
+            );
+            // Reset last_llm_path if the saved model is no longer allowed
+            // under the current plan. The setup body holds the only handle
+            // to `conn`, so do this before we move it into AppState.
+            let last_path: Option<String> = conn
+                .query_row(
+                    "SELECT value FROM settings WHERE key = 'last_llm_path'",
+                    [],
+                    |r| r.get(0),
+                )
+                .ok();
+            if let Some(p) = last_path.as_deref() {
+                let tier = license::gates::classify_model_path(std::path::Path::new(p));
+                if !license::gates::is_model_allowed(tier, &license_state) {
+                    eprintln!(
+                        "[license] downgrading: saved model {p} not allowed under plan {:?}",
+                        license_state.plan
+                    );
+                    let _ = conn.execute(
+                        "DELETE FROM settings WHERE key = 'last_llm_path'",
+                        [],
+                    );
+                }
+            }
+            // Make sure the quota table exists.
+            let _ = license::quota::ensure_table(&conn);
+
+            let shared_license = license::state::shared(license_state);
+
             app.manage(AppState {
                 db: Mutex::new(conn),
                 fts: Mutex::new(fts),
@@ -216,6 +254,8 @@ pub fn run() {
                 vi_stamp_path,
                 llm_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 api_llm_config: std::sync::Arc::new(std::sync::RwLock::new(api_llm_config)),
+                license: shared_license,
+                app_data_dir: data_dir.clone(),
             });
             let app_handle = app.handle().clone();
             let watcher_state = watcher::start_watcher(app_handle);
@@ -418,6 +458,11 @@ pub fn run() {
             commands::settings::get_indexed_types,
             commands::settings::set_indexed_types,
             commands::llm::summarize_documents,
+            commands::license::get_license_status,
+            commands::license::install_license_token,
+            commands::license::clear_license,
+            commands::license::get_hardware_fingerprint,
+            commands::license::get_quota,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

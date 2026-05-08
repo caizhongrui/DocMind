@@ -1,5 +1,6 @@
 use crate::embedder::Embedder;
 use crate::indexer::tantivy_index::FtsIndex;
+use crate::license::SharedLicense;
 use crate::llm::Llm;
 use crate::vector_index::VectorIndex;
 use rusqlite::Connection;
@@ -34,6 +35,10 @@ pub struct AppState {
     pub llm_cancel: Arc<AtomicBool>,
     /// API LLM 配置（RwLock 允许并发读，写时独占）
     pub api_llm_config: Arc<RwLock<ApiLlmConfig>>,
+    /// 当前 license 状态（free/trial/pro），由 license 模块在启动时填充。
+    pub license: SharedLicense,
+    /// 应用数据目录（license.json / trial.json 在此存放）。
+    pub app_data_dir: PathBuf,
 }
 
 /// API LLM 配置（OpenAI 兼容接口）
