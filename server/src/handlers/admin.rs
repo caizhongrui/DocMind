@@ -754,6 +754,10 @@ fn order_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Order> {
         license_key: r.get(6).ok(),
         raw_payload: r.get(7).ok(),
         created_at: parse_dt(&created_at).unwrap_or_else(Utc::now),
+        // The admin queries don't ask for these columns yet; default them.
+        // Future admin views can switch to a wider SELECT and populate them.
+        claim_ticket: None,
+        claim_consumed_at: None,
     })
 }
 

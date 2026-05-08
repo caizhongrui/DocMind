@@ -29,6 +29,8 @@ pub struct Order {
     pub license_key: Option<String>,
     pub raw_payload: Option<String>,
     pub created_at: DateTime<Utc>,
+    pub claim_ticket: Option<String>,
+    pub claim_consumed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

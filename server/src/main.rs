@@ -68,6 +68,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/license/activate", post(handlers::license::activate))
         .route("/payment/payjs/webhook", post(handlers::payment::payjs_webhook))
         .route("/payment/checkout", get(handlers::payment::start_checkout))
+        .route("/payment/order_status", get(handlers::payment::order_status))
         .route("/releases/public", get(handlers::releases::public_changelog))
         .route("/updates/:platform/:current_version", get(handlers::releases::updater_manifest));
 
@@ -84,7 +85,8 @@ async fn main() -> anyhow::Result<()> {
 
     let public_router = Router::new()
         .route("/", get(handlers::public::root))
-        .route("/activate", get(handlers::public::activate_get).post(handlers::public::activate_post));
+        .route("/activate", get(handlers::public::activate_get).post(handlers::public::activate_post))
+        .route("/payment/success", get(handlers::payment::payment_success));
 
     let app = Router::new()
         .nest("/api/v1", api_router)

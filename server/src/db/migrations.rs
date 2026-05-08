@@ -31,6 +31,8 @@ pub fn apply(conn: &Connection) -> anyhow::Result<()> {
             paid_at         TEXT,
             payment_type    TEXT,
             license_key     TEXT,
+            claim_ticket    TEXT UNIQUE,            -- random per-order secret; required to view license_key on /payment/success
+            claim_consumed_at TEXT,                 -- first time the license was successfully shown to the buyer
             raw_payload     TEXT,
             created_at      TEXT NOT NULL DEFAULT (datetime('now'))
         );
@@ -70,5 +72,24 @@ pub fn apply(conn: &Connection) -> anyhow::Result<()> {
         );
         "#,
     )?;
+
+    // Forward migrations on existing installs. Each ALTER TABLE swallows
+    // "duplicate column name" so re-running is idempotent.
+    apply_optional_alter(conn, "ALTER TABLE orders ADD COLUMN claim_ticket TEXT");
+    apply_optional_alter(conn, "ALTER TABLE orders ADD COLUMN claim_consumed_at TEXT");
+    let _ = conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_claim_ticket \
+         ON orders(claim_ticket) WHERE claim_ticket IS NOT NULL",
+        [],
+    );
     Ok(())
+}
+
+fn apply_optional_alter(conn: &Connection, sql: &str) {
+    if let Err(e) = conn.execute(sql, []) {
+        let msg = e.to_string();
+        if !msg.contains("duplicate column name") {
+            tracing::warn!("migration warning ({}): {}", sql, msg);
+        }
+    }
 }
