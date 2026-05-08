@@ -21,6 +21,7 @@ import QAPanel from "./components/QAPanel";
 import HelpDrawer from "./components/HelpDrawer";
 import LicenseStatusBar from "./components/LicenseStatusBar";
 import UpgradeDialog from "./components/UpgradeDialog";
+import UpdateNotifier from "./components/UpdateNotifier";
 import { useLicenseStore } from "./stores/licenseStore";
 
 const { Header } = Layout;
@@ -533,6 +534,9 @@ export default function App() {
 
       {/* Global upgrade prompt — opens whenever a Pro feature is gated */}
       <UpgradeDialog />
+
+      {/* Self-update: checks the server 30s after launch and every 6h */}
+      <UpdateNotifier />
     </>
   );
 }
