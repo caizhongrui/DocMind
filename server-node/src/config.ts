@@ -42,6 +42,11 @@ export const config = (() => {
   const wechatCertSerialNo = env("WECHAT_MCH_CERT_SERIAL_NO");
   const wechatPrivateKey = readPem("WECHAT_MCH_PRIVATE_KEY_PATH", "WECHAT_MCH_PRIVATE_KEY");
   const wechatPlatformCert = readPem("WECHAT_PLATFORM_CERT_PATH", "WECHAT_PLATFORM_CERT");
+  // ID for the new "微信支付公钥" scheme (PUB_KEY_ID_xxx). Optional —
+  // if set, callback verification additionally checks the Wechatpay-Serial
+  // header matches this ID, producing a clearer error than a raw signature
+  // mismatch when the wrong PEM is uploaded.
+  const wechatPlatformKeyId = env("WECHAT_PLATFORM_KEY_ID");
   const domain = env("DOMAIN", "doc-api.boyobang.com");
   const wechatNotifyUrl = env(
     "WECHAT_NOTIFY_URL",
@@ -67,6 +72,7 @@ export const config = (() => {
       certSerialNo: wechatCertSerialNo,
       privateKey: wechatPrivateKey,
       platformCert: wechatPlatformCert,
+      platformKeyId: wechatPlatformKeyId,
       notifyUrl: wechatNotifyUrl,
     },
     priceLifetimeFen: parseInt(env("PRICE_LIFETIME_FEN", "2000"), 10),

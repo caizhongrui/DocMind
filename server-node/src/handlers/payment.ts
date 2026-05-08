@@ -101,7 +101,18 @@ paymentRouter.post("/wechat/webhook", async (c) => {
   const timestamp = c.req.header("Wechatpay-Timestamp") ?? "";
   const nonce = c.req.header("Wechatpay-Nonce") ?? "";
   const signature = c.req.header("Wechatpay-Signature") ?? "";
+  const serial = c.req.header("Wechatpay-Serial") ?? "";
   const rawBody = await c.req.text();
+
+  // Defense-in-depth: if the operator configured WECHAT_PLATFORM_KEY_ID,
+  // the callback's Wechatpay-Serial header must match it. This catches
+  // the common misconfiguration of uploading the wrong PEM file.
+  if (w.platformKeyId && serial && serial !== w.platformKeyId) {
+    console.warn(
+      `[wechat] webhook serial mismatch: got ${serial} expected ${w.platformKeyId}`,
+    );
+    return c.json({ code: "FAIL", message: "serial mismatch" }, 401);
+  }
 
   const wp = new WechatPay(w);
   if (!wp.verifyCallback({ timestamp, nonce, body: rawBody, signature })) {
