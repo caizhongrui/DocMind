@@ -52,8 +52,16 @@ const year = new Date().getFullYear();
         </ul>
       </div>
     </div>
-    <div class="mt-10 flex items-center justify-between border-t border-ink-200 pt-6 text-sm text-ink-500">
+    <div class="mt-10 flex flex-col items-start gap-2 border-t border-ink-200 pt-6 text-sm text-ink-500 md:flex-row md:items-center md:justify-between">
       <span>© {year} DocMind · 保留所有权利</span>
+      <a
+        href="https://beian.miit.gov.cn/"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="hover:text-ink-900"
+      >
+        鲁ICP备2021030295号-7
+      </a>
       <span class="font-mono text-xs">made for local-first knowledge</span>
     </div>
   </div>
