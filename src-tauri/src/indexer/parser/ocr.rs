@@ -25,6 +25,14 @@ pub fn ocr_image_bytes(bytes: &[u8]) -> Result<String> {
     imp::recognize_image_bytes(bytes)
 }
 
+/// macOS 路径直读: 让 Vision 通过 NSURL → CGImageSource 拿图,等价于
+/// Swift 的 `NSImage(contentsOf:)`。当 in-memory bytes 路径返回乱码时
+/// (msg_send NSData 在某些情形下与 Swift `Data(contentsOf:)` 行为不一致)
+/// 用这条路径作为可靠 fallback。
+pub fn ocr_image_from_path(path: &std::path::Path) -> Result<String> {
+    imp::recognize_image_from_path(path)
+}
+
 /// 将 PDF 逐页渲染为图片后 OCR，返回全部页面的合并文字。
 pub fn ocr_pdf(path: &Path) -> Result<String> {
     use pdfium_render::prelude::*;
@@ -93,6 +101,19 @@ mod imp {
     pub fn recognize_image_bytes(bytes: &[u8]) -> Result<String> {
         use objc2::rc::autoreleasepool;
         autoreleasepool(|_| unsafe { vision_ocr(bytes) })
+    }
+
+    /// File path → CGImageSource → Vision. Bypasses our NSData/init(data:)
+    /// path which empirically returns garbage for some EXIF-tagged JPGs
+    /// even though Swift's `Data(contentsOf:)` + same Vision API works
+    /// correctly. Going through ImageIO's CGImageSource lets us hand
+    /// Vision a fully-decoded `CGImage` plus the orientation hint
+    /// extracted from the file's metadata, which matches what NSImage
+    /// does under the hood.
+    pub fn recognize_image_from_path(path: &std::path::Path) -> Result<String> {
+        use objc2::rc::autoreleasepool;
+        let path_str = path.to_string_lossy().into_owned();
+        autoreleasepool(|_| unsafe { vision_ocr_from_path(&path_str) })
     }
 
     unsafe fn vision_ocr(png: &[u8]) -> Result<String> {
@@ -199,6 +220,93 @@ mod imp {
 
         Ok(text)
     }
+
+    /// Same Vision flow but the handler is built from an NSURL via
+    /// `initWithURL:options:`. NSURL → CGImageSource (ImageIO) →
+    /// VNImageRequestHandler — Vision pulls the image AND its EXIF
+    /// orientation from the file metadata, so phone-photo JPGs that
+    /// carry "rotate 90°" tags decode correctly.
+    unsafe fn vision_ocr_from_path(path: &str) -> Result<String> {
+        use objc2::{class, msg_send};
+        use objc2::runtime::AnyObject;
+        use std::ffi::CStr;
+
+        let path_c = std::ffi::CString::new(path)?;
+        let ns_path: *mut AnyObject = msg_send![
+            class!(NSString),
+            stringWithUTF8String: path_c.as_ptr()
+        ];
+        if ns_path.is_null() {
+            return Err(anyhow::anyhow!("NSString creation failed"));
+        }
+        let url: *mut AnyObject = msg_send![class!(NSURL), fileURLWithPath: ns_path];
+        if url.is_null() {
+            return Err(anyhow::anyhow!("NSURL creation failed"));
+        }
+
+        let options: *mut AnyObject = msg_send![class!(NSDictionary), dictionary];
+        let handler_alloc: *mut AnyObject = msg_send![class!(VNImageRequestHandler), alloc];
+        let handler: *mut AnyObject = msg_send![
+            handler_alloc,
+            initWithURL: url,
+            options: options
+        ];
+        if handler.is_null() {
+            return Err(anyhow::anyhow!("VNImageRequestHandler initWithURL failed"));
+        }
+
+        let request: *mut AnyObject = msg_send![class!(VNRecognizeTextRequest), new];
+        let _: () = msg_send![request, setRecognitionLevel: 1_i64];
+        let _: () = msg_send![request, setUsesLanguageCorrection: true];
+        let zh_hans: *mut AnyObject = msg_send![
+            class!(NSString),
+            stringWithUTF8String: b"zh-Hans\0".as_ptr() as *const i8
+        ];
+        let zh_hant: *mut AnyObject = msg_send![
+            class!(NSString),
+            stringWithUTF8String: b"zh-Hant\0".as_ptr() as *const i8
+        ];
+        let en_us: *mut AnyObject = msg_send![
+            class!(NSString),
+            stringWithUTF8String: b"en-US\0".as_ptr() as *const i8
+        ];
+        let langs: *mut AnyObject = msg_send![
+            class!(NSArray),
+            arrayWithObjects: [zh_hans, zh_hant, en_us].as_ptr(),
+            count: 3_usize
+        ];
+        let _: () = msg_send![request, setRecognitionLanguages: langs];
+        let _: () = msg_send![request, setAutomaticallyDetectsLanguage: false];
+
+        let requests: *mut AnyObject = msg_send![class!(NSArray), arrayWithObject: request];
+        let mut error: *mut AnyObject = std::ptr::null_mut();
+        let _: bool = msg_send![handler, performRequests: requests, error: &mut error];
+
+        let results: *mut AnyObject = msg_send![request, results];
+        if results.is_null() {
+            return Ok(String::new());
+        }
+        let mut text = String::new();
+        let count: usize = msg_send![results, count];
+        for i in 0..count {
+            let obs: *mut AnyObject = msg_send![results, objectAtIndex: i];
+            let candidates: *mut AnyObject = msg_send![obs, topCandidates: 1_usize];
+            let cand_count: usize = msg_send![candidates, count];
+            if cand_count > 0 {
+                let candidate: *mut AnyObject = msg_send![candidates, firstObject];
+                let ns_str: *mut AnyObject = msg_send![candidate, string];
+                let c_str: *const i8 = msg_send![ns_str, UTF8String];
+                if !c_str.is_null() {
+                    let s = CStr::from_ptr(c_str).to_string_lossy();
+                    if !s.trim().is_empty() {
+                        text.push_str(&s);
+                        text.push('\n');
+                    }
+                }
+            }
+        }
+        Ok(text)
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -213,6 +321,12 @@ mod imp {
             image::ImageFormat::Png,
         )?;
         recognize_image_bytes(&png)
+    }
+
+    pub fn recognize_image_from_path(path: &std::path::Path) -> Result<String> {
+        // Windows OCR doesn't have a path-based init; just read + delegate.
+        let bytes = std::fs::read(path)?;
+        recognize_image_bytes(&bytes)
     }
 
     pub fn recognize_image_bytes(bytes: &[u8]) -> Result<String> {
@@ -273,6 +387,9 @@ mod imp {
         Err(anyhow::anyhow!("OCR not supported on this platform"))
     }
     pub fn recognize_image_bytes(_bytes: &[u8]) -> Result<String> {
+        Err(anyhow::anyhow!("OCR not supported on this platform"))
+    }
+    pub fn recognize_image_from_path(_path: &std::path::Path) -> Result<String> {
         Err(anyhow::anyhow!("OCR not supported on this platform"))
     }
 }

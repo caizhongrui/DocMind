@@ -31,19 +31,27 @@ pub fn parse_image(path: &Path) -> ParseResult {
         return ParseResult::failed();
     }
 
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("[parser/image] read failed for {}: {e}", path.display());
-            return ParseResult::failed();
-        }
-    };
-
-    match super::ocr::ocr_image_bytes(&bytes) {
+    // Use the path-based OCR entry point. On macOS this routes through
+    // `[VNImageRequestHandler initWithURL:]` → CGImageSource (ImageIO),
+    // which respects EXIF orientation properly. The in-memory bytes
+    // path empirically returned garbage for some EXIF-tagged JPGs.
+    match super::ocr::ocr_image_from_path(path) {
         Ok(text) if !text.trim().is_empty() => {
+            // DEBUG: dump first 200 chars of every JPG OCR so we can spot
+            // garbage results live. Remove this block once OCR quality is
+            // stable.
+            eprintln!(
+                "[parser/image] OCR ok: {} | len={} | first200=\"{}\"",
+                path.display(),
+                text.chars().count(),
+                text.chars().take(200).collect::<String>().replace('\n', "\\n"),
+            );
             ParseResult { content: text, status: ParseStatus::Ok }
         }
-        Ok(_) => ParseResult::failed(), // OCR 成功但无文字（空白图片等）
+        Ok(_) => {
+            eprintln!("[parser/image] OCR ok but empty: {}", path.display());
+            ParseResult::failed()
+        }
         Err(e) => {
             eprintln!("[parser/image] OCR failed for {}: {e}", path.display());
             ParseResult::failed()
