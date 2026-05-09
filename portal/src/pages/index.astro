@@ -1,6 +1,23 @@
 ---
 import Layout from "../layouts/Layout.astro";
 
+// Fetch the latest published version at build time so the hero badge
+// matches the real release. The runtime <script> below also re-fetches
+// on page load so a freshly-published version shows up without a portal
+// rebuild.
+let latestVersion = "0.1.6";
+try {
+  const r = await fetch("https://doc-api.boyobang.com/api/v1/releases/public");
+  if (r.ok) {
+    const rows = (await r.json()) as Array<{ version: string }>;
+    if (Array.isArray(rows) && rows[0]?.version) {
+      latestVersion = rows[0].version;
+    }
+  }
+} catch {
+  // network unavailable at build time — keep the fallback
+}
+
 const features = [
   {
     title: "全文搜索",
@@ -45,10 +62,11 @@ const features = [
       <div class="grid items-center gap-14 md:grid-cols-2">
         <div>
           <div
+            id="version-badge"
             class="mb-5 inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-medium text-primary-700"
           >
             <span class="h-1.5 w-1.5 rounded-full bg-primary-500"></span>
-            v0.2 现已上线
+            <span id="version-text">v{latestVersion} 现已上线</span>
           </div>
           <h1
             class="text-4xl font-bold leading-tight tracking-tight text-ink-900 md:text-5xl md:leading-[1.1]"
@@ -267,3 +285,23 @@ const features = [
     </div>
   </section>
 </Layout>
+
+<!-- Live-refresh the version badge so the homepage always reflects the
+     latest release without needing to rebuild the portal. -->
+<script is:inline>
+(async () => {
+  try {
+    const r = await fetch("https://doc-api.boyobang.com/api/v1/releases/public", {
+      cache: "no-store",
+    });
+    if (!r.ok) return;
+    const rows = await r.json();
+    const latest = Array.isArray(rows) && rows[0]?.version;
+    if (!latest) return;
+    const el = document.getElementById("version-text");
+    if (el) el.textContent = `v${latest} 现已上线`;
+  } catch {
+    // keep the SSR fallback if the API is unreachable
+  }
+})();
+</script>
