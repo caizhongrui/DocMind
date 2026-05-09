@@ -168,7 +168,7 @@ export default function HelpDrawer({ open, onClose, onStartTour }: Props) {
       onClose={onClose}
       styles={DRAWER_STYLES}
     >
-      <SectionCard title="Features" icon={<FileSearchOutlined />}>
+      <SectionCard title="功能简介" icon={<FileSearchOutlined />}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {FEATURES.map((f) => (
             <div key={f.title} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
@@ -202,7 +202,7 @@ export default function HelpDrawer({ open, onClose, onStartTour }: Props) {
         </div>
       </SectionCard>
 
-      <SectionCard title="Supported Formats" icon={<FileTextOutlined />}>
+      <SectionCard title="支持的格式" icon={<FileTextOutlined />}>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {FORMAT_GROUPS.map((group) => (
             <div key={group.label}>
@@ -254,7 +254,7 @@ export default function HelpDrawer({ open, onClose, onStartTour }: Props) {
         </div>
       </SectionCard>
 
-      <SectionCard title="Keyboard Shortcuts" icon={<KeyOutlined />}>
+      <SectionCard title="键盘快捷键" icon={<KeyOutlined />}>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {SHORTCUTS.map((s, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -273,7 +273,7 @@ export default function HelpDrawer({ open, onClose, onStartTour }: Props) {
         </div>
       </SectionCard>
 
-      <SectionCard title="Contact" icon={<MailOutlined />}>
+      <SectionCard title="联系我们" icon={<MailOutlined />}>
         <Typography.Text type="secondary" style={{ fontSize: 12, lineHeight: 1.8, display: "block", marginBottom: 14 }}>
           如果你有以下需求，欢迎通过邮件联系我们：
         </Typography.Text>

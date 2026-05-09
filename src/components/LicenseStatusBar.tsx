@@ -1,7 +1,6 @@
-import { Tooltip, Popconfirm, message } from "antd";
+import { Tooltip } from "antd";
 import { CrownOutlined } from "@ant-design/icons";
 import { useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useLicenseStore } from "../stores/licenseStore";
 
 function daysLeft(iso: string | null): number | null {
@@ -24,54 +23,29 @@ export default function LicenseStatusBar() {
   if (!status) return null;
 
   if (status.plan === "pro") {
-    const handleClear = async () => {
-      try {
-        await invoke("clear_license");
-        await refresh();
-        message.success("已清除本机激活");
-      } catch (e) {
-        message.error(`清除失败: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    };
-
     return (
-      <Popconfirm
-        title="清除本机激活?"
-        description={
-          <div style={{ fontSize: 12, lineHeight: 1.6, maxWidth: 240 }}>
-            <div>仅限本机生效。License Key 在服务端仍绑定到当前指纹,</div>
-            <div>可随时再粘贴 token JSON 重新激活。</div>
+      <Tooltip
+        title={
+          <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+            <div>已激活 DocMind Pro</div>
+            <div style={{ opacity: 0.8 }}>License: {status.license_key?.slice(0, 19)}…</div>
+            <div style={{ opacity: 0.8 }}>设备指纹: {status.fingerprint.slice(0, 16)}…</div>
           </div>
         }
-        okText="清除"
-        cancelText="取消"
-        okButtonProps={{ danger: true }}
-        onConfirm={handleClear}
       >
-        <Tooltip
-          title={
-            <div style={{ fontSize: 12, lineHeight: 1.6 }}>
-              <div>已激活 DocMind Pro</div>
-              <div style={{ opacity: 0.8 }}>License: {status.license_key?.slice(0, 19)}…</div>
-              <div style={{ opacity: 0.8 }}>设备指纹: {status.fingerprint.slice(0, 16)}…</div>
-              <div style={{ opacity: 0.6, marginTop: 4 }}>(点击可重置,用于本机测试)</div>
-            </div>
-          }
+        <span
+          className="chip chip-pro"
+          style={{
+            height: 22,
+            padding: "0 8px",
+            cursor: "default",
+            fontFamily: "inherit",
+          }}
         >
-          <button
-            className="chip chip-pro"
-            style={{
-              height: 22,
-              padding: "0 8px",
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            <CrownOutlined style={{ fontSize: 11 }} />
-            Pro
-          </button>
-        </Tooltip>
-      </Popconfirm>
+          <CrownOutlined style={{ fontSize: 11 }} />
+          Pro
+        </span>
+      </Tooltip>
     );
   }
 
