@@ -288,6 +288,48 @@ export default function QAPanel() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // ResultList batch toolbar 的"生成摘要"按钮通过 docmind-start-summary
+  // 事件把目标文件路径丢过来。我们在这里 push 占位消息 +
+  // invokePro("summarize_documents") —— ask-token 流就能正常 append 到
+  // 最后那条 assistant 消息上。
+  useEffect(() => {
+    const onSummary = async (ev: Event) => {
+      const detail = (ev as CustomEvent<{ paths: string[] }>).detail;
+      if (!detail?.paths?.length) return;
+      const fileNames = detail.paths
+        .map((p) => p.split("/").pop() ?? p)
+        .slice(0, 3)
+        .join("、")
+        + (detail.paths.length > 3 ? ` 等 ${detail.paths.length} 份` : "");
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", content: `请为以下文档生成综合摘要:${fileNames}` },
+        { role: "assistant", content: "", streaming: true },
+      ]);
+      setAsking(true);
+      try {
+        await invokePro("summarize_documents", { paths: detail.paths });
+      } catch (e) {
+        setMessages((prev) => {
+          const msgs = [...prev];
+          const last = msgs[msgs.length - 1];
+          if (last?.role === "assistant") {
+            msgs[msgs.length - 1] = {
+              ...last,
+              content: `摘要生成失败:${localizeError(e)}`,
+              error: true,
+              streaming: false,
+            };
+          }
+          return msgs;
+        });
+        setAsking(false);
+      }
+    };
+    window.addEventListener("docmind-start-summary", onSummary);
+    return () => window.removeEventListener("docmind-start-summary", onSummary);
+  }, []);
+
   const handleDownload = (model: GgufModelInfo) => {
     setDownloadingModel(model.id);
     setDownloadProgress(0);

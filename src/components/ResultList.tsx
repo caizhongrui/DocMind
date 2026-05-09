@@ -20,7 +20,6 @@ import {
 import { useSearchStore } from "../stores/searchStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { invoke } from "@tauri-apps/api/core";
-import { invokePro } from "../stores/licenseStore";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { HighlightText } from "../utils/highlight";
 import type { SearchResult } from "../types";
@@ -655,17 +654,18 @@ export default function ResultList() {
             size="small"
             icon={<RobotOutlined />}
             disabled={selectedItems.size === 0 || selectedItems.size > 10}
-            onClick={async () => {
-              const paths = filtered.filter((r) => selectedItems.has(r.file_id)).map((r) => r.path);
-              try {
-                await invokePro("summarize_documents", { paths });
-                message.info("摘要生成中，请打开「文档问答」面板查看结果");
-                window.dispatchEvent(new CustomEvent("docmind-open-qa"));
-              } catch (e) {
-                const msg = String(e);
-                if (msg.startsWith("PRO_REQUIRED:")) return; // dialog already shown
-                message.error(`摘要生成失败：${msg}`);
-              }
+            onClick={() => {
+              // The QAPanel will own the actual summarize_documents call
+              // so it can wire the streaming ask-token events into its
+              // message list. We just hand it the paths via a custom
+              // event and open the drawer.
+              const paths = filtered
+                .filter((r) => selectedItems.has(r.file_id))
+                .map((r) => r.path);
+              window.dispatchEvent(
+                new CustomEvent("docmind-start-summary", { detail: { paths } }),
+              );
+              window.dispatchEvent(new CustomEvent("docmind-open-qa"));
             }}
           >
             生成摘要
