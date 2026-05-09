@@ -259,7 +259,10 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
     setIndexing(folder);
     setProgress(null);
     try {
-      await invoke("start_index", { folder });
+      // force=true → re-parse every file regardless of modtime. Without
+      // this the scan would skip everything that hasn't changed and the
+      // button would appear to "complete" instantly.
+      await invoke("start_index", { folder, force: true });
     } catch (e: unknown) {
       message.error(`索引失败：${e instanceof Error ? e.message : String(e)}`);
       setIndexing(null);

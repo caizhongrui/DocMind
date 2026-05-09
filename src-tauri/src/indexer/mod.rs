@@ -52,6 +52,18 @@ const MAX_CHUNKS_PER_FILE: usize = 100;
 ///   - FTS writer 独立存活，不依赖 fts Mutex；每 BATCH_SIZE 文件 commit 一次
 ///   - 每个文件解析后主动 sleep，让出 CPU 给 UI 和其他进程
 pub fn scan_and_index(folder: &Path, state: &AppState, app: &AppHandle) -> Result<Vec<(i64, PathBuf)>> {
+    scan_and_index_with(folder, state, app, false)
+}
+
+/// Same as `scan_and_index`, but `force=true` re-parses every file even
+/// when its modtime is unchanged. Used for the "重新索引" button so a
+/// repeat click actually re-runs OCR / PDF parse against existing files.
+pub fn scan_and_index_with(
+    folder: &Path,
+    state: &AppState,
+    app: &AppHandle,
+    force: bool,
+) -> Result<Vec<(i64, PathBuf)>> {
     // 从 DB 读取用户配置的启用类型，key 不存在时使用全量默认
     let enabled_exts: Vec<String> = {
         let db = state.db.lock().map_err(|_| anyhow::anyhow!("db lock poisoned"))?;
@@ -167,7 +179,7 @@ pub fn scan_and_index(folder: &Path, state: &AppState, app: &AppHandle) -> Resul
             (existing_modified == Some(modified), old_id)
         }; // db 锁释放
 
-        if skip {
+        if skip && !force {
             continue;
         }
 

@@ -5,9 +5,11 @@ use tauri::{AppHandle, Emitter, Manager, State};
 #[tauri::command]
 pub fn start_index(
     folder: String,
+    force: Option<bool>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<String, String> {
+    let force = force.unwrap_or(false);
     // 立即将文件夹写入 DB
     {
         let db = state.db.lock().map_err(|_| "db lock poisoned".to_string())?;
@@ -30,7 +32,7 @@ pub fn start_index(
         let path = std::path::Path::new(&folder);
 
         // Phase 1：全文索引，完成后立即通知前端（用户可开始使用全文搜索）
-        match crate::indexer::scan_and_index(path, &state, &app) {
+        match crate::indexer::scan_and_index_with(path, &state, &app, force) {
             Ok(to_embed) => {
                 let _ = app.emit("index-complete", &folder);
 
