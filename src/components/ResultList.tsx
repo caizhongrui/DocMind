@@ -130,10 +130,24 @@ export default function ResultList() {
   useEffect(() => {
     const el = listContainerRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setListHeight(el.clientHeight));
+    const apply = () => {
+      const h = el.clientHeight;
+      // On the very first paint the parent flex hasn't laid out yet
+      // and clientHeight can be 0 — react-window then renders no rows
+      // and the list looks blank. Ignore the 0 reading and retry on the
+      // next ResizeObserver tick (which fires once layout settles).
+      if (h > 0) setListHeight(h);
+    };
+    const ro = new ResizeObserver(apply);
     ro.observe(el);
-    setListHeight(el.clientHeight);
-    return () => ro.disconnect();
+    apply();
+    // RAF fallback for the case where ResizeObserver doesn't fire (e.g.
+    // parent dimensions don't change but our content did).
+    const raf = requestAnimationFrame(apply);
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(raf);
+    };
   }, []);
 
   const toggleItemSelect = (fileId: number) => {
