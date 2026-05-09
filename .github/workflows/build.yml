@@ -145,23 +145,35 @@ jobs:
       - name: List downloaded artifacts
         run: find artifacts -type f | sort
 
-      - name: Capture GitHub Release body for `notes`
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0           # need full tag history for git tag -l --format
+
+      - name: Capture release notes (prefer annotated tag message)
         id: relbody
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ github.ref_name }}
         run: |
-          # The release was just created by softprops/action-gh-release with
-          # generate_release_notes: true → `gh release view` returns the
-          # auto-generated changelog (commits since previous tag). Pipe it
-          # through the GHA-recommended multiline-output protocol so newlines
-          # survive into the next step's env.
-          body="$(gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
-          echo "▸ release body preview ($(echo "$body" | wc -l | tr -d ' ') lines):"
-          echo "$body" | head -10
+          # Prefer the annotated tag's own message (the user-facing changelog
+          # passed to `./scripts/release.sh 0.1.x "..."`). Fall back to the
+          # GitHub-auto-generated body only when the tag is lightweight
+          # (no message). This keeps the doc-api / portal changelog showing
+          # what the maintainer wrote, not "Full Changelog: ..." commit list.
+          tag_msg="$(git tag -l --format='%(contents:body)' "$VERSION")"
+          if [ -z "$(echo "$tag_msg" | tr -d '[:space:]')" ]; then
+            tag_msg="$(git tag -l --format='%(contents)' "$VERSION")"
+          fi
+          if [ -z "$(echo "$tag_msg" | tr -d '[:space:]')" ]; then
+            echo "▸ tag message empty, falling back to GitHub-generated body"
+            tag_msg="$(gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+          else
+            echo "▸ using annotated tag message ($(echo "$tag_msg" | wc -l | tr -d ' ') lines)"
+          fi
+          echo "$tag_msg" | head -8
           {
             echo "body<<DOCMIND_NOTES_EOF"
-            echo "$body"
+            echo "$tag_msg"
             echo "DOCMIND_NOTES_EOF"
           } >> "$GITHUB_OUTPUT"
 
