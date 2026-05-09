@@ -9,9 +9,20 @@ use image::DynamicImage;
 use std::path::Path;
 use anyhow::Result;
 
-/// 识别单张图片，返回识别文字。
+/// 识别单张图片(in-memory `DynamicImage`),返回识别文字。
+/// 主要用于 PDF 渲染出来的页面图(已经无 EXIF orientation,无需特殊处理)。
 pub fn ocr_image(img: &DynamicImage) -> Result<String> {
     imp::recognize_image(img)
+}
+
+/// 直接把磁盘上 JPG/PNG/HEIC/...的原始字节交给系统 OCR 引擎。
+///
+/// 比 `ocr_image` 多了一个关键好处:Apple Vision / Windows OCR 都会自己
+/// 解析 EXIF orientation,把"标着旋转 90°"的手机照片正过来再识别。手机
+/// 拍的身份证照、微信图片大量是这种情形,如果走 image crate 解码 + PNG
+/// re-encode 那条路,Vision 拿到的是侧着的像素 → 识别全错。
+pub fn ocr_image_bytes(bytes: &[u8]) -> Result<String> {
+    imp::recognize_image_bytes(bytes)
 }
 
 /// 将 PDF 逐页渲染为图片后 OCR，返回全部页面的合并文字。
@@ -66,18 +77,22 @@ mod imp {
     use image::DynamicImage;
     use anyhow::Result;
 
-    /// 使用 Apple Vision 框架识别图片文字。
-    /// 通过 objc2 msg_send! 宏直接发 ObjC 消息，避免依赖特定绑定版本的类型系统。
+    /// In-memory `DynamicImage` → PNG → Vision (loses EXIF, used by PDF page render).
     pub fn recognize_image(img: &DynamicImage) -> Result<String> {
         use objc2::rc::autoreleasepool;
-
         let mut png = Vec::new();
         img.write_to(
             &mut std::io::Cursor::new(&mut png),
             image::ImageFormat::Png,
         )?;
-
         autoreleasepool(|_| unsafe { vision_ocr(&png) })
+    }
+
+    /// Raw file bytes → Vision (preserves EXIF orientation; preferred for
+    /// disk-backed JPG/PNG/HEIC/...). Vision parses the format itself.
+    pub fn recognize_image_bytes(bytes: &[u8]) -> Result<String> {
+        use objc2::rc::autoreleasepool;
+        autoreleasepool(|_| unsafe { vision_ocr(bytes) })
     }
 
     unsafe fn vision_ocr(png: &[u8]) -> Result<String> {
@@ -192,6 +207,15 @@ mod imp {
     use anyhow::Result;
 
     pub fn recognize_image(img: &DynamicImage) -> Result<String> {
+        let mut png = Vec::new();
+        img.write_to(
+            &mut std::io::Cursor::new(&mut png),
+            image::ImageFormat::Png,
+        )?;
+        recognize_image_bytes(&png)
+    }
+
+    pub fn recognize_image_bytes(bytes: &[u8]) -> Result<String> {
         use windows::{
             core::HSTRING,
             Globalization::Language,
@@ -200,20 +224,16 @@ mod imp {
             Storage::Streams::{DataWriter, InMemoryRandomAccessStream},
         };
 
-        let mut png = Vec::new();
-        img.write_to(
-            &mut std::io::Cursor::new(&mut png),
-            image::ImageFormat::Png,
-        )?;
-
         let stream = InMemoryRandomAccessStream::new()?;
         let writer = DataWriter::CreateDataWriter(&stream)?;
-        writer.WriteBytes(&png)?;
+        writer.WriteBytes(bytes)?;
         writer.StoreAsync()?.get()?;
         writer.FlushAsync()?.get()?;
         drop(writer);
         stream.Seek(0)?;
 
+        // Windows.Graphics.Imaging.BitmapDecoder honors EXIF orientation
+        // automatically when fed the raw container bytes.
         let decoder = BitmapDecoder::CreateAsync(&stream)?.get()?;
         let bitmap = decoder.GetSoftwareBitmapAsync()?.get()?;
 
@@ -250,6 +270,9 @@ mod imp {
     use anyhow::Result;
 
     pub fn recognize_image(_img: &DynamicImage) -> Result<String> {
+        Err(anyhow::anyhow!("OCR not supported on this platform"))
+    }
+    pub fn recognize_image_bytes(_bytes: &[u8]) -> Result<String> {
         Err(anyhow::anyhow!("OCR not supported on this platform"))
     }
 }
