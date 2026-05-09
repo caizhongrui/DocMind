@@ -39,9 +39,10 @@ import Layout from "../layouts/Layout.astro";
 
       <h3 class="mt-4 text-base font-semibold">2.2 License 激活与购买</h3>
       <p class="mt-2 text-sm leading-relaxed">
-        购买 Pro 时,你的支付信息(姓名、付款方式)由 PayJS 处理,我们只接收支付状态与订单号,不接触你的银行卡或账户密码。
-        激活时,客户端会向 license 服务器发送你的 license key 和当前设备的硬件指纹(SHA-256 哈希值,不可还原成原始硬件信息)。
-        服务器把这两者关联起来,签发一份本地 license token。激活完成后,客户端永远不再调用服务器。
+        购买 Pro 时,客户端直接对接微信支付商户平台(微信支付 V3 API),你的支付信息由微信支付处理,我们只接收支付状态、订单号与微信交易号,不接触你的银行卡、微信账号或支付密码。
+      </p>
+      <p class="mt-2 text-sm leading-relaxed">
+        发起支付时,客户端会把当前设备的<strong>硬件指纹</strong>(主板序列号 + 网卡 MAC 等的 SHA-256 哈希,不可还原成原始硬件信息)随订单一起发送到 license 服务器。支付成功后,服务器用 Ed25519 私钥签发一份与该指纹绑定的本地 license token,并通过订单回调推回客户端。客户端验签后存到本地,后续<strong>永远不再调用任何远程服务</strong>(除非检查更新或主动重新激活)。
       </p>
 
       <h3 class="mt-4 text-base font-semibold">2.3 下载日志</h3>

@@ -82,7 +82,7 @@ function fmt(v: boolean | string) {
         >
           下载体验
         </a>
-        <p class="mt-2 text-center text-xs text-ink-500">5 天试用 · 在客户端内升级 · 支持支付宝 / 微信</p>
+        <p class="mt-2 text-center text-xs text-ink-500">5 天试用 · 客户端内微信扫码 · 自动激活,无需手动输入</p>
         <ul class="mt-6 space-y-3 text-sm text-ink-700">
           <li class="flex gap-2"><span class="text-primary-500">✓</span>无限 AI 语义搜索 + 问答</li>
           <li class="flex gap-2"><span class="text-primary-500">✓</span>全部模型档位 + 自定义 GGUF</li>
@@ -102,9 +102,9 @@ function fmt(v: boolean | string) {
           </svg>
           <div class="text-sm leading-relaxed text-amber-900">
             <strong>License 绑定到当前设备。</strong>
-            一旦激活,Pro license 就和这台设备的硬件指纹绑定,无法转移到其他机器。
-            换电脑、重装系统、更换主板都会导致 license 失效需要重新购买。
-            <strong>请在你常用的设备上完成激活。</strong>
+            付款后客户端会自动接收一份与本机硬件指纹绑定的 license token,无需手动输入激活码。
+            一旦激活,该 license 不可转移到其他机器,换电脑、重装系统或更换主板会导致硬件指纹变化、原 license 失效。
+            如确有迁移需要,可联系客服酌情补发。<strong>建议在你常用的设备上完成购买。</strong>
           </div>
         </div>
       </div>
@@ -159,11 +159,18 @@ function fmt(v: boolean | string) {
           </p>
         </div>
         <div>
+          <h3 class="text-base font-semibold text-ink-900">怎么收到 license?</h3>
+          <p class="mt-2 text-sm text-ink-700">
+            不需要复制激活码。客户端弹出微信支付二维码 → 手机扫码付款 → 客户端自动接收
+            license token 并激活,顶栏直接变 👑 Pro。
+          </p>
+        </div>
+        <div>
           <h3 class="text-base font-semibold text-ink-900">换电脑怎么办?</h3>
           <p class="mt-2 text-sm text-ink-700">
-            License 绑定单一设备且不可转移。换机需要重新购买。这个限制是产品设计选择 —
-            为了让定价能保持极低,我们不维护客服级别的解绑流程。
-            建议在你的主力工作设备上完成激活。
+            License 与硬件指纹一对一绑定且不可在客户端自助迁移。换机或重装系统后,
+            可联系客服并提供原订单号 + 新设备指纹,我们会酌情人工补发激活 token。
+            建议在你的主力工作设备上完成购买,减少迁移麻烦。
           </p>
         </div>
         <div>
