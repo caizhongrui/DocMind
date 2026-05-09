@@ -117,8 +117,37 @@ mod imp {
         // setRecognitionLevel: 1 = Accurate
         let _: () = msg_send![request, setRecognitionLevel: 1_i64];
         let _: () = msg_send![request, setUsesLanguageCorrection: true];
-        // 自动语言检测（macOS 12+）
-        let _: () = msg_send![request, setAutomaticallyDetectsLanguage: true];
+
+        // Explicitly tell Vision the languages we expect. Auto-detect
+        // (`automaticallyDetectsLanguage`) is unreliable for mixed CJK +
+        // Latin content — left to its own devices it tries to read 中文
+        // strokes as English letters and produces garbage like "¥,niru$*".
+        // Chinese first because most users on this app are Chinese; the
+        // model still recognises pure-English images correctly thanks to
+        // the trailing en-US entry. Fonts of zh-Hans cover Hant too in
+        // practice, but listing both is cheap insurance.
+        let zh_hans: *mut AnyObject = msg_send![
+            class!(NSString),
+            stringWithUTF8String: b"zh-Hans\0".as_ptr() as *const i8
+        ];
+        let zh_hant: *mut AnyObject = msg_send![
+            class!(NSString),
+            stringWithUTF8String: b"zh-Hant\0".as_ptr() as *const i8
+        ];
+        let en_us: *mut AnyObject = msg_send![
+            class!(NSString),
+            stringWithUTF8String: b"en-US\0".as_ptr() as *const i8
+        ];
+        let langs: *mut AnyObject = msg_send![
+            class!(NSArray),
+            arrayWithObjects: [zh_hans, zh_hant, en_us].as_ptr(),
+            count: 3_usize
+        ];
+        let _: () = msg_send![request, setRecognitionLanguages: langs];
+        // Disable auto-detect since we've now told Vision exactly what to
+        // look for — letting both run can re-introduce the auto-detect
+        // garbage on borderline images.
+        let _: () = msg_send![request, setAutomaticallyDetectsLanguage: false];
 
         // NSArray<VNRequest*> = [request]
         let requests: *mut AnyObject = msg_send![class!(NSArray), arrayWithObject: request];
