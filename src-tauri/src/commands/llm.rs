@@ -453,10 +453,17 @@ pub fn ask_question_stream(
     eprintln!("[RAG DEBUG] question={question:?}");
     eprintln!("[RAG DEBUG] context=\n{context_text}");
 
-    // 5. 构建多轮对话 prompt
-    // system 轮
-    let mut prompt = format!(
-        "<|im_start|>system\n你是一个本地文件助手。请严格根据用户提供的文档内容回答问题，直接给出答案，不要编造信息。只有文档中确实没有相关内容时，才说找不到答案。<|im_end|>\n"
+    // 5. 构建多轮对话 prompt — 强约束防止"答非所问"
+    let mut prompt = String::from(
+        "<|im_start|>system\n\
+         你是一名严谨的文档助手。请严格按以下规则作答:\n\
+         1. 只使用「参考文档」段落中的内容,绝对不能调用你训练时学到的知识\n\
+         2. 如果参考文档里没有明确写出答案,直接回复「提供的文档中没有相关内容」,不要猜测、不要泛化\n\
+         3. 回答时必须引用具体文件名作为依据,例如:根据《xxx.docx》...\n\
+         4. 数字、日期、姓名、金额等关键事实必须与文档完全一致,不可改写\n\
+         5. 回答应当简洁直接,不重复问题,不输出与问题无关的内容\n\
+         6. 多份文档说法不一致时,按文件名分别列出各自说法\n\
+         <|im_end|>\n"
     );
 
     // 历史轮（最多保留最近 6 轮，避免 context 溢出）
@@ -473,7 +480,7 @@ pub fn ask_question_stream(
 
     // 当前问题（附带检索到的上下文）
     prompt.push_str(&format!(
-        "<|im_start|>user\n以下是相关文档内容：\n\n{context_text}\n\n请根据上述内容回答：{question} /no_think<|im_end|>\n\
+        "<|im_start|>user\n参考文档:\n\n{context_text}\n\n问题:{question}\n\n请严格根据上述参考文档回答,不能调用你的常识。/no_think<|im_end|>\n\
          <|im_start|>assistant\n<think>\n\n</think>\n\n"
     ));
 
@@ -572,7 +579,14 @@ pub fn ask_question_scoped(
     let context_text = context_parts.join("\n\n---\n\n");
 
     let mut prompt = String::from(
-        "<|im_start|>system\n你是一个文档问答助手。请严格根据用户提供的文档内容回答问题,引用具体文件名作为依据,不要编造信息。文档中没有相关内容时直接说找不到。<|im_end|>\n"
+        "<|im_start|>system\n\
+         你是一名严谨的文档助手。请严格按以下规则作答:\n\
+         1. 只使用「参考文档」中的内容,绝对不能调用训练知识\n\
+         2. 如果参考文档里没有明确写出答案,直接回复「提供的文档中没有相关内容」,不要猜测\n\
+         3. 回答时必须引用具体文件名作为依据,例如:根据《xxx.docx》...\n\
+         4. 数字、日期、姓名、金额等关键事实必须与文档完全一致\n\
+         5. 回答简洁直接,不重复问题\n\
+         <|im_end|>\n"
     );
     if let Some(hist) = &history {
         let start = if hist.len() > 6 { hist.len() - 6 } else { 0 };
@@ -585,7 +599,7 @@ pub fn ask_question_scoped(
         }
     }
     prompt.push_str(&format!(
-        "<|im_start|>user\n以下是用户选定的 {} 份文档内容:\n\n{context_text}\n\n请根据上述文档回答:{question} /no_think<|im_end|>\n\
+        "<|im_start|>user\n参考文档(用户已限定为以下 {} 份):\n\n{context_text}\n\n问题:{question}\n\n请严格根据上述参考文档回答,不能调用你的常识。/no_think<|im_end|>\n\
          <|im_start|>assistant\n<think>\n\n</think>\n\n",
         sources.len()
     ));

@@ -592,6 +592,27 @@ export default function QAPanel() {
             </div>
           )}
 
+          {/* Small-model warning: 0.6B is barely usable for nuanced
+              Q&A. Nudge the user toward 1.7B / 4B without being naggy. */}
+          {loadedModel === "qwen3-0.6b-q4" && (
+            <div
+              style={{
+                flexShrink: 0,
+                marginBottom: 10,
+                padding: "8px 12px",
+                background: "rgba(245, 158, 11, 0.08)",
+                border: "1px solid rgba(245, 158, 11, 0.28)",
+                borderRadius: 8,
+                fontSize: 12,
+                lineHeight: 1.7,
+                color: "#92400e",
+              }}
+            >
+              当前是 <strong>0.6B 轻量模型</strong>,推理能力有限,容易"答非所问"。
+              复杂问答建议下载 <strong>1.7B</strong>(推荐) 或 <strong>4B</strong>(高质量) 模型。
+            </div>
+          )}
+
           {/* Toolbar */}
           {loadedModel && (
             <div

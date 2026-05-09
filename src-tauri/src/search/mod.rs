@@ -496,14 +496,16 @@ pub fn search_hybrid_for_rag(
 
     chunks.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
-    // 相关性分数过滤：去除得分远低于最高分的 chunk，防止无关内容污染 LLM 上下文。
-    // 策略：保留得分 >= max_score * 0.25 的 chunk（相对阈值），
-    //       且至少保留得分最高的那一条（兜底）。
+    // 相关性分数过滤:更严格的双重阈值,防止无关 chunk 污染 LLM 上下文,
+    // 减少"答非所问"的概率。
+    //   - 相对阈值: max_score * 0.4 (旧值 0.25 太宽松,差太多分的 chunk 还会进 LLM)
+    //   - 绝对地板: 0.12  (BM25 only 命中分通常 0.05-0.15,小于这个基本是噪声)
+    //   - 兜底:    至少保留得分最高的那一条
     if chunks.len() > 1 {
         let max_score = chunks[0].score;
-        let threshold = (max_score * 0.25).max(0.05);
+        let threshold = (max_score * 0.4).max(0.12);
         let keep = chunks.iter().position(|c| c.score < threshold).unwrap_or(chunks.len());
-        let keep = keep.max(1); // 至少保留 1 条
+        let keep = keep.max(1);
         chunks.truncate(keep);
     }
 
