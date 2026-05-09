@@ -83,6 +83,35 @@ jobs:
 
       - run: npm ci
 
+      # Code-sign the produced .exe / .msi when an OV certificate is
+      # available. Skipped on PRs and when the secrets aren't set,
+      # so unsigned builds still go through. Once you've bought a
+      # Sectigo OV cert and added the two secrets below, every Windows
+      # build will be signed automatically:
+      #   WINDOWS_CERTIFICATE          base64 of the .pfx file
+      #   WINDOWS_CERTIFICATE_PASSWORD .pfx password
+      - name: Decode signing certificate (if available)
+        id: cert
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE) {
+            Write-Host "WINDOWS_CERTIFICATE secret not set — building unsigned."
+            "thumbprint=" | Out-File $env:GITHUB_OUTPUT -Append
+            exit 0
+          }
+          $bytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          $pfxPath = Join-Path $env:RUNNER_TEMP "docmind-cert.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, $bytes)
+          $pwd = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfxPath `
+                    -CertStoreLocation Cert:\CurrentUser\My -Password $pwd
+          "thumbprint=$($cert.Thumbprint)" | Out-File $env:GITHUB_OUTPUT -Append
+          Write-Host "imported cert thumbprint: $($cert.Thumbprint)"
+          Remove-Item $pfxPath
+
       - name: Build (x86_64-pc-windows-msvc)
         run: npm run tauri build
         env:
@@ -90,6 +119,10 @@ jobs:
           # 与 ort_sys (ONNX Runtime) / llama_cpp_sys_2 预编译库一致
           CFLAGS: /MD
           CXXFLAGS: /MD
+          # When the cert step ran, hand its thumbprint to Tauri so the
+          # bundler invokes signtool against signed .exe / .msi outputs.
+          # If empty (no cert), Tauri still builds — just unsigned.
+          TAURI_SIGNING_CERTIFICATE_THUMBPRINT: ${{ steps.cert.outputs.thumbprint }}
 
       - uses: actions/upload-artifact@v4
         with:

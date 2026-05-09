@@ -41,7 +41,13 @@ RUN npm run build && \
 # ────────────────────────────────────────────────────────────────────────────
 FROM docker.m.daocloud.io/library/node:20-alpine AS runtime
 
-RUN apk add --no-cache tini
+# tini for proper PID 1 / signal handling. tzdata is required so the
+# TZ env var actually shifts Node's `new Date()` to Beijing time —
+# alpine ships UTC-only by default and admin pages would otherwise
+# render every timestamp 8 hours behind for users in mainland China.
+RUN apk add --no-cache tini tzdata && \
+    cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    echo "Asia/Shanghai" > /etc/timezone
 
 WORKDIR /app
 
@@ -59,7 +65,8 @@ ENV NODE_ENV=production \
     PORT=8080 \
     PORTAL_ROOT=/app/portal \
     DOMAIN=doc-api.boyobang.com \
-    PORTAL_DOMAIN=doc-web.boyobang.com
+    PORTAL_DOMAIN=doc-web.boyobang.com \
+    TZ=Asia/Shanghai
 
 EXPOSE 8080
 VOLUME ["/data"]
