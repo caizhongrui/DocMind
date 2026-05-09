@@ -509,17 +509,25 @@ export default function ResultList() {
               style={{ color: "var(--color-text-muted)", marginRight: "auto" }}
             />
           </Tooltip>
-          <Tooltip title={batchMode ? "退出批量模式" : "批量操作"}>
+          <Tooltip
+            title={
+              batchMode
+                ? "退出批量模式"
+                : "勾选多份文档,可以针对它们一起做问答 / 摘要"
+            }
+          >
             <Button
               size="small"
-              type={batchMode ? "primary" : "text"}
+              type={batchMode ? "primary" : "default"}
               icon={<CheckSquareOutlined />}
               onClick={() => {
                 setBatchMode((v) => !v);
                 clearSelection();
               }}
-              style={{ color: batchMode ? undefined : "var(--color-text-muted)" }}
-            />
+              style={{ fontSize: 12 }}
+            >
+              {batchMode ? "退出多选" : "多选问答"}
+            </Button>
           </Tooltip>
           <Select
             size="small"
@@ -533,6 +541,24 @@ export default function ResultList() {
               { value: "size", label: "文件大小" },
             ]}
           />
+        </div>
+      )}
+
+      {/* Batch toolbar — empty-state hint */}
+      {batchMode && selectedItems.size === 0 && (
+        <div
+          style={{
+            padding: "8px 12px",
+            background: "rgba(59, 130, 246, 0.06)",
+            borderBottom: "1px solid var(--color-border)",
+            fontSize: 12,
+            color: "var(--color-primary)",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          ☑ 勾选下方文件 (建议 ≤10 份),然后可"针对所选问答"或"生成摘要"
         </div>
       )}
 
