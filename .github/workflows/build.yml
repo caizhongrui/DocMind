@@ -218,6 +218,9 @@ jobs:
           RELEASE_BODY: ${{ steps.relbody.outputs.body }}
         run: |
           set -euo pipefail
+          # nullglob: 匹配不到时让 glob 直接展成空数组而不是字面量(避免
+          # ls "literal *" 出错),这样我们可以可靠地用 ${arr[0]:-} 取首项。
+          shopt -s nullglob
           if [ -z "$PUBLISH_TOKEN" ]; then
             echo "::error::RELEASES_PUBLISH_TOKEN secret not set — skipping doc-api sync"
             exit 1
@@ -229,11 +232,11 @@ jobs:
           publish() {
             local platform="$1" updater="$2" sig="$3"
             if [ ! -f "$updater" ]; then
-              echo "::warning::no updater bundle for $platform at $updater — skipping"
+              echo "::warning::no updater bundle for $platform (path=\"$updater\") — skipping"
               return
             fi
             if [ ! -f "$sig" ]; then
-              echo "::warning::no signature for $platform at $sig — skipping"
+              echo "::warning::no signature for $platform (path=\"$sig\") — skipping"
               return
             fi
             echo "▸ uploading $platform: $(basename "$updater")"
@@ -248,17 +251,18 @@ jobs:
             echo
           }
 
-          # macOS arm64
-          publish "darwin-aarch64" \
-            "$(ls artifacts/macos-arm64/macos/*.app.tar.gz 2>/dev/null | head -1)" \
-            "$(ls artifacts/macos-arm64/macos/*.app.tar.gz.sig 2>/dev/null | head -1)"
+          # macOS arm64 — bash glob, no pipe (避免 SIGPIPE 让 ls 异常退出导致
+          # $(ls X | head -1) 返回空)
+          mac_arm64_app=(artifacts/macos-arm64/macos/*.app.tar.gz)
+          mac_arm64_sig=(artifacts/macos-arm64/macos/*.app.tar.gz.sig)
+          publish "darwin-aarch64" "${mac_arm64_app[0]:-}" "${mac_arm64_sig[0]:-}"
 
           # macOS x64 (Intel) — currently disabled, see workflow header.
 
           # Windows x64 — Tauri's NSIS updater bundle is the .exe itself
           # (signed by the .exe.sig file alongside it).
-          publish "windows-x86_64" \
-            "$(ls artifacts/windows-x64/nsis/*.exe 2>/dev/null | head -1)" \
-            "$(ls artifacts/windows-x64/nsis/*.exe.sig 2>/dev/null | head -1)"
+          win_exe=(artifacts/windows-x64/nsis/*.exe)
+          win_sig=(artifacts/windows-x64/nsis/*.exe.sig)
+          publish "windows-x86_64" "${win_exe[0]:-}" "${win_sig[0]:-}"
 
           echo "✓ doc-api sync complete"
