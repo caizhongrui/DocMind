@@ -259,7 +259,7 @@ mod imp {
         }
 
         let request: *mut AnyObject = msg_send![class!(VNRecognizeTextRequest), new];
-        let _: () = msg_send![request, setRecognitionLevel: 1_i64];
+        let _: () = msg_send![request, setRecognitionLevel: 0_i64]; // 0 = Accurate
         let _: () = msg_send![request, setUsesLanguageCorrection: true];
         let zh_hans: *mut AnyObject = msg_send![
             class!(NSString),
