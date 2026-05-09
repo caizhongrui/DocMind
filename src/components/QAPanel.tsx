@@ -40,18 +40,24 @@ interface DownloadProgress {
 
 const LAST_MODEL_KEY = "docmind_last_llm_model_path";
 
-const MODEL_META: Record<string, { desc: string; tag?: string }> = {
+// 每个本地模型在 RAG 问答时检索的 chunk 数,与 src-tauri/src/llm/mod.rs
+// 中的 rag_max_chunks() 完全对应。chunk 数越多,AI 能看到的参考来源
+// 越多,回答覆盖面越广 — 但也吃更多内存和时间。
+const MODEL_META: Record<string, { desc: string; tag?: string; chunks: number }> = {
   "qwen3-0.6b-q4": {
-    desc: "超轻量，内存占用最低（约 600MB），速度最快，适合 4GB 内存及低配设备，回答深度有限",
+    desc: "超轻量,内存占用最低(约 600MB),速度最快。每次问答检索 4 个文档片段,回答深度有限,容易答非所问",
     tag: "低配",
+    chunks: 4,
   },
   "qwen3-1.7b-q4": {
-    desc: "性能与资源最均衡，中文理解好，文档问答质量优秀，适合绝大多数用户",
+    desc: "性能与资源最均衡,中文理解好,文档问答质量优秀。每次问答检索 6 个文档片段,适合绝大多数用户",
     tag: "推荐",
+    chunks: 6,
   },
   "qwen3-4b-q4": {
-    desc: "推理能力更强，长文档理解与逻辑分析更准确，需 8GB+ 内存，生成速度较慢",
+    desc: "推理能力更强,长文档理解与逻辑分析更准确。每次问答检索 10 个文档片段,需 8GB+ 内存,生成速度稍慢",
     tag: "高质量",
+    chunks: 10,
   },
 };
 
@@ -517,6 +523,13 @@ export default function QAPanel() {
                           <span className="chip" style={{ height: 16 }}>
                             {MODEL_META[m.id].tag}
                           </span>
+                        )}
+                        {MODEL_META[m.id]?.chunks !== undefined && (
+                          <Tooltip title="每次问答时,模型最多查看的文档片段数。数字越大,参考资料越全面,但也更耗内存和时间。">
+                            <span className="chip" style={{ height: 16 }}>
+                              📑 {MODEL_META[m.id].chunks} 片段
+                            </span>
+                          </Tooltip>
                         )}
                         {m.downloaded && (
                           <span className="chip chip-primary" style={{ height: 16 }}>
