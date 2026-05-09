@@ -150,8 +150,11 @@ mod imp {
         if request.is_null() {
             return Err(anyhow::anyhow!("VNRecognizeTextRequest creation failed"));
         }
-        // setRecognitionLevel: 1 = Accurate
-        let _: () = msg_send![request, setRecognitionLevel: 1_i64];
+        // setRecognitionLevel: 0 = Accurate, 1 = Fast (Apple's enum is
+        // backwards from intuition — accurate is the default and the
+        // smaller integer). This was previously misset to 1 (Fast), which
+        // mangled Chinese OCR on EXIF-rotated phone photos.
+        let _: () = msg_send![request, setRecognitionLevel: 0_i64];
         let _: () = msg_send![request, setUsesLanguageCorrection: true];
 
         // Explicitly tell Vision the languages we expect. Auto-detect
