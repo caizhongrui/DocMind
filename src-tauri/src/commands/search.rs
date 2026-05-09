@@ -10,7 +10,10 @@ pub fn search_files(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<Vec<search::SearchResult>, String> {
-    let limit = limit.unwrap_or(50);
+    // 默认上限 300:全文索引里同一个高频词(如人名)很容易被多份正文反复
+    // 命中,Tantivy 用 BM25 排序后 OCR 出来的图像/扫描件常常被挤出 top 50。
+    // 前端拿到 300 条,再用 file_type chip 做客户端筛选,体验更接近"全部命中"。
+    let limit = limit.unwrap_or(300);
     // Semantic search counts against the same monthly AI quota as Q&A.
     if mode == "semantic" {
         crate::commands::license::consume_ai_quota(&app, &state)?;
