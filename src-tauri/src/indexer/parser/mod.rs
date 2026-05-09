@@ -58,12 +58,22 @@ pub fn parse_file(path: &Path) -> ParseResult {
     let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     let max_size = match ext.as_str() {
         "txt" | "md" | "csv" | "rst" | "rtf"               => MAX_SIZE_TEXT,
+        // Source code & config files: same generous text limit (rare to
+        // see >100 MB source files; if present they're build artifacts).
+        "py" | "js" | "ts" | "jsx" | "tsx" | "mjs" | "cjs"
+        | "java" | "go" | "rs" | "c" | "cpp" | "cc" | "cxx" | "h" | "hpp"
+        | "swift" | "kt" | "kts" | "scala" | "rb" | "php" | "cs"
+        | "vue" | "svelte" | "html" | "htm" | "css" | "scss" | "less"
+        | "yaml" | "yml" | "json" | "toml" | "ini" | "conf" | "xml"
+        | "sh" | "bash" | "zsh" | "fish" | "ps1" | "bat" | "cmd"
+        | "sql" | "graphql" | "proto" | "lua" | "pl" | "r" | "dart"
+        | "log"                                             => MAX_SIZE_TEXT,
         "doc"  | "ppt"                                      => MAX_SIZE_DOC,
-        "docx" | "pptx"                                     => MAX_SIZE_DOCX,
+        "docx" | "pptx" | "epub"                            => MAX_SIZE_DOCX,
         "xls"  | "xlsx"                                     => MAX_SIZE_XLSX,
         "zip"                                               => MAX_SIZE_ZIP,
         "jpg" | "jpeg" | "png" | "bmp" | "tiff" | "tif"
-        | "webp"                                            => MAX_SIZE_IMAGE,
+        | "webp" | "heic" | "heif"                          => MAX_SIZE_IMAGE,
         _                                                   => u64::MAX, // pdf 由 pdf.rs 自己管
     };
     if file_size > max_size {
@@ -80,13 +90,27 @@ pub fn parse_file(path: &Path) -> ParseResult {
     let mut result = match ext.as_str() {
         "txt" | "md" | "csv" | "rst"                        => text::parse(path),
         "rtf"                                               => text::parse_rtf(path),
+        // Code / config: route through the plain-text reader. The CJK
+        // ngram tokenizer in Tantivy still indexes ascii substrings
+        // sensibly (e.g. "throw new Error" → "throw", "new", "Error"),
+        // so users searching for class names / variable names / log
+        // strings still get hits.
+        "py" | "js" | "ts" | "jsx" | "tsx" | "mjs" | "cjs"
+        | "java" | "go" | "rs" | "c" | "cpp" | "cc" | "cxx" | "h" | "hpp"
+        | "swift" | "kt" | "kts" | "scala" | "rb" | "php" | "cs"
+        | "vue" | "svelte" | "html" | "htm" | "css" | "scss" | "less"
+        | "yaml" | "yml" | "json" | "toml" | "ini" | "conf" | "xml"
+        | "sh" | "bash" | "zsh" | "fish" | "ps1" | "bat" | "cmd"
+        | "sql" | "graphql" | "proto" | "lua" | "pl" | "r" | "dart"
+        | "log"                                             => text::parse(path),
         "pdf"                                               => pdf::parse(path),
         "docx" | "pptx"                                     => office::parse_xml(path),
+        "epub"                                              => office::parse_epub(path),
         "xls"  | "xlsx"                                     => office::parse_xlsx(path),
         "doc"  | "ppt"                                      => office::parse_doc(path),
         "zip"                                               => archive::parse_zip(path),
         "jpg" | "jpeg" | "png" | "bmp" | "tiff" | "tif"
-        | "webp"                                            => image::parse_image(path),
+        | "webp" | "heic" | "heif"                          => image::parse_image(path),
         _                                                   => ParseResult::failed(),
     };
 

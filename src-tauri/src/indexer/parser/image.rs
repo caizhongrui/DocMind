@@ -3,8 +3,9 @@ use super::{ParseResult, ParseStatus};
 
 /// 图片文件 OCR 解析
 ///
-/// 支持格式：jpg/jpeg/png/bmp/tiff/tif/webp
+/// 支持格式：jpg / jpeg / png / bmp / tiff / tif / webp / heic / heif
 /// 调用平台原生 OCR 引擎（macOS Vision / Windows.Media.Ocr）。
+/// HEIC 在 macOS 上由 ImageIO 直接解码,无需额外依赖。
 /// 不支持 OCR 的平台返回 Failed（静默跳过，不影响文件名搜索）。
 ///
 /// 实现细节:把**原始文件字节**直接交给系统 OCR 引擎,而不是先用 image

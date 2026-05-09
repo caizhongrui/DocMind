@@ -53,6 +53,55 @@ fn extract_xml_text(path: &Path) -> anyhow::Result<String> {
     Ok(result)
 }
 
+/// EPUB e-book parser.
+///
+/// EPUB 本质上就是一个 zip 包,里面是一系列 XHTML 章节 + 元数据。
+/// 这里走一条最简单可靠的路径:
+///   1. 打开 zip
+///   2. 把所有 .html / .xhtml / .htm entry 的内容提出来
+///   3. 用 strip_xml_tags 剥掉所有标签 → 纯文本
+///
+/// 不做章节划分 / 标题层级抽取 — 对全文搜索来说没必要,纯文本就够。
+pub fn parse_epub(path: &Path) -> ParseResult {
+    match extract_epub_text(path) {
+        Ok(text) if !text.trim().is_empty() => {
+            ParseResult { content: text, status: ParseStatus::Ok }
+        }
+        _ => ParseResult::failed(),
+    }
+}
+
+fn extract_epub_text(path: &Path) -> anyhow::Result<String> {
+    let file = std::fs::File::open(path)?;
+    let mut archive = zip::ZipArchive::new(file)?;
+    let mut result = String::new();
+
+    // EPUB spine 顺序需要解析 OPF,但对全文索引来说乱序也无所谓 —
+    // 只要文本进了倒排索引,搜什么词都能命中。这里直接遍历所有
+    // (x)html entry。
+    let mut entries: Vec<String> = (0..archive.len())
+        .filter_map(|i| archive.by_index(i).ok().map(|e| e.name().to_string()))
+        .filter(|n| {
+            let lower = n.to_ascii_lowercase();
+            (lower.ends_with(".xhtml") || lower.ends_with(".html") || lower.ends_with(".htm"))
+                && !lower.contains("__macosx")
+        })
+        .collect();
+    entries.sort(); // 至少按字典序稳定一下,大多数 EPUB 章节命名带数字前缀
+
+    for name in entries {
+        let mut entry = archive.by_name(&name)?;
+        let mut raw = String::new();
+        entry.take(MAX_XML_ENTRY_BYTES).read_to_string(&mut raw)?;
+        result.push_str(&strip_xml_tags(&raw));
+        result.push('\n');
+        if result.chars().count() >= MAX_XML_TOTAL_CHARS {
+            break;
+        }
+    }
+    Ok(result)
+}
+
 fn strip_xml_tags(xml: &str) -> String {
     let mut out = String::with_capacity(xml.len() / 2);
     let mut in_tag = false;

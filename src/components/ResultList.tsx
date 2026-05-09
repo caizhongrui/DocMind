@@ -88,8 +88,16 @@ const TYPE_GROUPS: { label: string; types: string[] }[] = [
   { label: "Word",  types: ["docx", "doc"] },
   { label: "Excel", types: ["xlsx", "xls", "csv"] },
   { label: "PPT",   types: ["pptx", "ppt"] },
+  { label: "电子书", types: ["epub"] },
   { label: "文本",  types: ["txt", "md", "rst"] },
-  { label: "图像",  types: ["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"] },
+  { label: "代码",  types: [
+    "py", "js", "ts", "jsx", "tsx", "java", "go", "rs",
+    "c", "cpp", "h", "swift", "kt", "rb", "php", "cs",
+    "vue", "svelte", "html", "css", "scss",
+    "yaml", "yml", "json", "toml", "xml",
+    "sh", "sql",
+  ] },
+  { label: "图像",  types: ["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp", "heic", "heif"] },
   { label: "归档",  types: ["zip"] },
 ];
 

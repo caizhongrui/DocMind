@@ -28,11 +28,18 @@ import { useLicenseStore } from "../stores/licenseStore";
 // `pro: true` 的分组只有 Pro / Trial 用户可以勾选；Free 用户点 chip 会
 // 直接弹升级对话框,reason="ocr_indexing"。
 const FILE_TYPE_GROUPS = [
-  { label: "文档", types: ["pdf", "docx", "doc", "pptx", "ppt", "rtf"] },
+  { label: "文档", types: ["pdf", "docx", "doc", "pptx", "ppt", "rtf", "epub"] },
   { label: "表格", types: ["xlsx", "xls", "csv"] },
   { label: "文本/标记", types: ["txt", "md", "rst"] },
+  { label: "代码", types: [
+    "py", "js", "ts", "jsx", "tsx", "java", "go", "rs",
+    "c", "cpp", "h", "swift", "kt", "rb", "php", "cs",
+    "vue", "svelte", "html", "css", "scss",
+    "yaml", "yml", "json", "toml", "xml",
+    "sh", "sql",
+  ] },
   { label: "归档", types: ["zip"] },
-  { label: "图像 (OCR)", types: ["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"], pro: true },
+  { label: "图像 (OCR)", types: ["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp", "heic", "heif"], pro: true },
 ] as const;
 
 const ALL_TYPES = FILE_TYPE_GROUPS.flatMap((g) => [...g.types]);
