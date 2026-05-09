@@ -30,6 +30,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { useState, useEffect, useRef } from "react";
 import type { SourceRef, Message, GgufModelInfo } from "../types";
 import { invokePro, localizeError } from "../stores/licenseStore";
+import { useSelectionStore } from "../stores/selectionStore";
 
 interface DownloadProgress {
   model_id: string;
@@ -334,7 +335,15 @@ export default function QAPanel() {
     setInput("");
     setAsking(true);
 
-    invokePro<SourceRef[]>("ask_question_stream", { question: q, history })
+    // If the user has scoped this conversation to a set of documents
+    // (via the result-list batch toolbar), route to ask_question_scoped
+    // so the LLM only sees those files. Otherwise the global RAG path.
+    const scope = useSelectionStore.getState().scopeFiles;
+    const cmd = scope.length > 0 ? "ask_question_scoped" : "ask_question_stream";
+    const args: Record<string, unknown> = { question: q, history };
+    if (scope.length > 0) args.paths = scope.map((s) => s.path);
+
+    invokePro<SourceRef[]>(cmd, args)
       .then((sources) => {
         setMessages((prev) => {
           const msgs = [...prev];
@@ -383,10 +392,51 @@ export default function QAPanel() {
     }
   };
 
+  const scopeFiles = useSelectionStore((s) => s.scopeFiles);
+  const clearScope = useSelectionStore((s) => s.clearScope);
+
   return (
     <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 0 }}>
+          {scopeFiles.length > 0 && (
+            <div
+              style={{
+                flexShrink: 0,
+                marginBottom: 10,
+                padding: "8px 12px",
+                background: "var(--color-primary-bg)",
+                border: "1px solid var(--color-primary)",
+                borderRadius: 8,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 12,
+                color: "var(--color-primary)",
+                lineHeight: 1.5,
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>📑 已限定 {scopeFiles.length} 份文档</span>
+              <span
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  color: "var(--color-text-secondary)",
+                  fontSize: 11,
+                }}
+                title={scopeFiles.map((f) => f.name).join("\n")}
+              >
+                {scopeFiles.slice(0, 3).map((f) => f.name).join(" · ")}
+                {scopeFiles.length > 3 ? ` · +${scopeFiles.length - 3}` : ""}
+              </span>
+              <Button size="small" type="text" onClick={clearScope}>
+                退出范围
+              </Button>
+            </div>
+          )}
           {/* Model selection */}
           {!loadedModel && (
             <div

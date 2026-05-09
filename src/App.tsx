@@ -64,6 +64,15 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [qaOpen, setQaOpen] = useState(false);
+
+  // Other components (ResultList batch toolbar, etc.) ask App to open
+  // the QA drawer by dispatching `docmind-open-qa`.
+  useEffect(() => {
+    const onOpen = () => setQaOpen(true);
+    window.addEventListener("docmind-open-qa", onOpen);
+    return () => window.removeEventListener("docmind-open-qa", onOpen);
+  }, []);
+
   const [helpOpen, setHelpOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
   const [modelAvailable, setModelAvailable] = useState(false);

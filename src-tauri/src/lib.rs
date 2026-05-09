@@ -432,6 +432,7 @@ pub fn run() {
             commands::llm::load_llm_model,
             commands::llm::ask_question,
             commands::llm::ask_question_stream,
+            commands::llm::ask_question_scoped,
             commands::llm::import_custom_gguf,
             commands::llm::get_loaded_llm_path,
             commands::index::get_index_stats,

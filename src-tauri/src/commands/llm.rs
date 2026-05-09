@@ -512,6 +512,115 @@ pub fn ask_question_stream(
     Ok(sources)
 }
 
+/// 限定文档范围的流式问答(NotebookLM 模式)。
+///
+/// 用户在结果列表里多选若干文档,然后向 AI 提问 —— 只用这些文档的内容
+/// 作为上下文,不走全库 RAG。比起在整库里搜索答案,精度更高,也避免
+/// 跨项目污染。
+///
+/// 事件序列:ask-token / ask-done / ask-error,与 `ask_question_stream` 一致。
+/// 同样受月度 AI 配额限制(Free 用户每月 30 次)。
+#[tauri::command]
+pub fn ask_question_scoped(
+    question: String,
+    paths: Vec<String>,
+    history: Option<Vec<HistoryMessage>>,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<Vec<SourceRef>, String> {
+    crate::commands::license::consume_ai_quota(&app, &state)?;
+
+    if paths.is_empty() {
+        return Err("请先选择要问答的文档".to_string());
+    }
+
+    // 模型必须已加载。
+    let max_chunks = {
+        let guard = state.llm.lock().map_err(|_| "llm lock poisoned".to_string())?;
+        match guard.as_ref() {
+            Some(llm) => llm.rag_max_chunks(),
+            None => return Err("LLM 未加载,请先在设置中选择并加载模型".to_string()),
+        }
+    };
+
+    // 文档总量预算:每份文档分到的字符数 = (max_chunks * 700) / paths.len()
+    // 但下限 1000 字符,上限 4000 字符,避免极端情况。
+    use crate::indexer::parser::parse_file;
+    let per_doc_chars: usize = ((max_chunks * 700) / paths.len().max(1))
+        .max(1000)
+        .min(4000);
+
+    let mut sources: Vec<SourceRef> = Vec::new();
+    let mut context_parts: Vec<String> = Vec::new();
+    for path_str in &paths {
+        let p = std::path::Path::new(path_str);
+        if !p.exists() { continue; }
+        let parsed = parse_file(p);
+        if parsed.content.is_empty() { continue; }
+        let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let snippet: String = parsed.content.chars().take(per_doc_chars).collect();
+        sources.push(SourceRef {
+            name: name.clone(),
+            path: path_str.clone(),
+            snippet: parsed.content.chars().take(200).collect::<String>(),
+        });
+        context_parts.push(format!("【文件:{name}】\n{snippet}"));
+    }
+    if context_parts.is_empty() {
+        return Err("无法读取所选文件内容".to_string());
+    }
+    let context_text = context_parts.join("\n\n---\n\n");
+
+    let mut prompt = String::from(
+        "<|im_start|>system\n你是一个文档问答助手。请严格根据用户提供的文档内容回答问题,引用具体文件名作为依据,不要编造信息。文档中没有相关内容时直接说找不到。<|im_end|>\n"
+    );
+    if let Some(hist) = &history {
+        let start = if hist.len() > 6 { hist.len() - 6 } else { 0 };
+        for msg in &hist[start..] {
+            match msg.role.as_str() {
+                "user" => prompt.push_str(&format!("<|im_start|>user\n{}<|im_end|>\n", msg.content)),
+                "assistant" => prompt.push_str(&format!("<|im_start|>assistant\n{}<|im_end|>\n", msg.content)),
+                _ => {}
+            }
+        }
+    }
+    prompt.push_str(&format!(
+        "<|im_start|>user\n以下是用户选定的 {} 份文档内容:\n\n{context_text}\n\n请根据上述文档回答:{question} /no_think<|im_end|>\n\
+         <|im_start|>assistant\n<think>\n\n</think>\n\n",
+        sources.len()
+    ));
+
+    state.llm_cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+    let cancel = std::sync::Arc::clone(&state.llm_cancel);
+
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let guard = match state.llm.lock() {
+            Ok(g) => g,
+            Err(_) => {
+                let _ = app.emit("ask-error", "llm lock poisoned");
+                return;
+            }
+        };
+        match guard.as_ref() {
+            Some(llm) => {
+                let result = llm.generate_stream(&prompt, 2048, cancel, |piece| {
+                    let _ = app.emit("ask-token", piece);
+                });
+                match result {
+                    Ok(_) => { let _ = app.emit("ask-done", ()); }
+                    Err(e) => { let _ = app.emit("ask-error", e.to_string()); }
+                }
+            }
+            None => {
+                let _ = app.emit("ask-error", "LLM 未加载");
+            }
+        }
+    });
+
+    Ok(sources)
+}
+
 /// 导入本地 GGUF 模型文件（将文件复制到 models 目录）
 #[tauri::command]
 pub async fn import_custom_gguf(path: String, app: AppHandle) -> Result<String, String> {

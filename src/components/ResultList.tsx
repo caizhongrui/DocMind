@@ -18,6 +18,7 @@ import {
   RobotOutlined,
 } from "@ant-design/icons";
 import { useSearchStore } from "../stores/searchStore";
+import { useSelectionStore } from "../stores/selectionStore";
 import { invoke } from "@tauri-apps/api/core";
 import { invokePro } from "../stores/licenseStore";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -591,11 +592,35 @@ export default function ResultList() {
             size="small"
             icon={<RobotOutlined />}
             disabled={selectedItems.size === 0 || selectedItems.size > 10}
+            onClick={() => {
+              // Push the selected files into the global Q&A scope and
+              // open the QAPanel. The QAPanel reads the scope and will
+              // route every question through ask_question_scoped — no
+              // RAG over the whole index, just these documents.
+              const picked = filtered.filter((r) => selectedItems.has(r.file_id));
+              useSelectionStore.getState().setScope(
+                picked.map((r) => ({
+                  file_id: r.file_id,
+                  path: r.path,
+                  name: r.name,
+                  file_type: r.file_type,
+                })),
+              );
+              window.dispatchEvent(new CustomEvent("docmind-open-qa"));
+            }}
+          >
+            针对所选问答
+          </Button>
+          <Button
+            size="small"
+            icon={<RobotOutlined />}
+            disabled={selectedItems.size === 0 || selectedItems.size > 10}
             onClick={async () => {
               const paths = filtered.filter((r) => selectedItems.has(r.file_id)).map((r) => r.path);
               try {
                 await invokePro("summarize_documents", { paths });
                 message.info("摘要生成中，请打开「文档问答」面板查看结果");
+                window.dispatchEvent(new CustomEvent("docmind-open-qa"));
               } catch (e) {
                 const msg = String(e);
                 if (msg.startsWith("PRO_REQUIRED:")) return; // dialog already shown
