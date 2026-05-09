@@ -87,6 +87,8 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
 
   // ── 定时重索引 ──
   const [reindexInterval, setReindexInterval] = useState(0);
+  const [excludedDirs, setExcludedDirs] = useState("");
+  const [savingExcluded, setSavingExcluded] = useState(false);
 
   // ── 文件类型过滤 ──
   const [enabledTypes, setEnabledTypes] = useState<string[]>([...ALL_TYPES]);
@@ -130,6 +132,9 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
         .then((s) => setShortcut(s ?? ""))
         .catch(() => {});
       invoke<number>("get_reindex_interval").then(v => setReindexInterval(v)).catch(() => {});
+      invoke<string | null>("get_setting", { key: "excluded_dirs" })
+        .then((v) => setExcludedDirs((v ?? "").split(",").filter((s) => s.trim().length > 0).join("\n")))
+        .catch(() => {});
       invoke<string[]>("get_indexed_types")
         .then((types) => setEnabledTypes(types))
         .catch(() => setEnabledTypes([...ALL_TYPES]));
@@ -992,6 +997,90 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
               onClick={async () => {
                 await invoke("set_reindex_interval", { minutes: reindexInterval });
                 message.success(reindexInterval === 0 ? "已禁用定时重索引" : `已设置每 ${reindexInterval} 分钟重索引`);
+              }}
+            >
+              保存
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── 排除目录 ── */}
+      <div style={{ marginTop: 16, borderRadius: 8, border: "1px solid var(--color-border)", overflow: "hidden" }}>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)", display: "flex", alignItems: "center", gap: 8 }}>
+          <DeleteOutlined style={{ color: "var(--color-text-secondary)", fontSize: 13 }} />
+          <span className="section-label">Excluded Directories</span>
+        </div>
+        <div style={{ padding: "14px 16px" }}>
+          <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 10, lineHeight: 1.7 }}>
+            扫描时跳过这些子目录。下面这些是<strong>内置默认</strong>(始终生效),你可以再补充自定义的目录名。
+          </Typography.Text>
+
+          <div style={{
+            background: "var(--color-surface-elevated)",
+            border: "1px solid var(--color-border)",
+            borderRadius: 6,
+            padding: "8px 12px",
+            marginBottom: 12,
+            fontSize: 11,
+            lineHeight: 1.7,
+            color: "var(--color-text-secondary)",
+            fontFamily: "var(--font-mono)",
+            wordBreak: "break-all",
+          }}>
+            .git · .svn · .hg · node_modules · target · build · dist · .next · .cache ·{" "}
+            __pycache__ · venv · .venv · .idea · .vscode · .DS_Store · Thumbs.db ·{" "}
+            <span style={{ opacity: 0.7 }}>(以及所有以"."开头的隐藏目录)</span>
+          </div>
+
+          <Typography.Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 4 }}>
+            自定义排除目录(每行一个,只写目录名,不带路径):
+          </Typography.Text>
+          <textarea
+            value={excludedDirs}
+            onChange={(e) => setExcludedDirs(e.target.value)}
+            placeholder={"例如:\nbackup\nlogs\nold-projects"}
+            spellCheck={false}
+            className="mono"
+            rows={4}
+            style={{
+              width: "100%",
+              padding: "8px 12px",
+              fontSize: 12,
+              background: "var(--color-surface-elevated)",
+              border: "1px solid var(--color-border)",
+              borderRadius: 6,
+              color: "var(--color-text)",
+              outline: "none",
+              fontFamily: "var(--font-mono)",
+              resize: "vertical",
+            }}
+          />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, gap: 8 }}>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+              修改后需要点上方文件夹的「重新索引」才生效。
+            </Typography.Text>
+            <Button
+              size="small"
+              type="primary"
+              loading={savingExcluded}
+              onClick={async () => {
+                setSavingExcluded(true);
+                try {
+                  // Normalize: split on newlines / commas, trim, dedupe, rejoin with commas.
+                  const items = excludedDirs
+                    .split(/[,\n]/)
+                    .map((s) => s.trim())
+                    .filter((s) => s.length > 0);
+                  const normalized = Array.from(new Set(items)).join(",");
+                  await invoke("set_setting", { key: "excluded_dirs", value: normalized });
+                  setExcludedDirs(normalized.split(",").join("\n"));
+                  message.success(items.length === 0 ? "已清空自定义排除目录" : `已保存 ${items.length} 项`);
+                } catch (e) {
+                  message.error(`保存失败:${e instanceof Error ? e.message : String(e)}`);
+                } finally {
+                  setSavingExcluded(false);
+                }
               }}
             >
               保存
