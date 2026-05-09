@@ -19,6 +19,7 @@ import {
 } from "@ant-design/icons";
 import { useSearchStore } from "../stores/searchStore";
 import { useSelectionStore } from "../stores/selectionStore";
+import { useLicenseStore } from "../stores/licenseStore";
 import { invoke } from "@tauri-apps/api/core";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { HighlightText } from "../utils/highlight";
@@ -117,6 +118,9 @@ type RowExtraProps = {
 
 export default function ResultList() {
   const { results, selected, setSelected, loading, query, mode, sortBy, setSortBy } = useSearchStore();
+  const licensePlan = useLicenseStore((s) => s.status?.plan);
+  const showUpgrade = useLicenseStore((s) => s.showUpgrade);
+  const isPro = licensePlan === "pro" || licensePlan === "trial";
   const [activeTypes, setActiveTypes] = useState<string[]>([]);
   const isSemantic = mode === "semantic";
 
@@ -650,26 +654,49 @@ export default function ResultList() {
           >
             针对所选问答
           </Button>
-          <Button
-            size="small"
-            icon={<RobotOutlined />}
-            disabled={selectedItems.size === 0 || selectedItems.size > 10}
-            onClick={() => {
-              // The QAPanel will own the actual summarize_documents call
-              // so it can wire the streaming ask-token events into its
-              // message list. We just hand it the paths via a custom
-              // event and open the drawer.
-              const paths = filtered
-                .filter((r) => selectedItems.has(r.file_id))
-                .map((r) => r.path);
-              window.dispatchEvent(
-                new CustomEvent("docmind-start-summary", { detail: { paths } }),
-              );
-              window.dispatchEvent(new CustomEvent("docmind-open-qa"));
-            }}
+          <Tooltip
+            title={
+              isPro
+                ? undefined
+                : "批量摘要是 Pro 功能,试用版同样可用。点击查看升级方式"
+            }
           >
-            生成摘要
-          </Button>
+            <Button
+              size="small"
+              icon={<RobotOutlined />}
+              disabled={selectedItems.size === 0 || selectedItems.size > 10}
+              onClick={() => {
+                if (!isPro) {
+                  // Free 用户:不执行,直接弹升级对话框。
+                  showUpgrade("batch_summary");
+                  return;
+                }
+                const paths = filtered
+                  .filter((r) => selectedItems.has(r.file_id))
+                  .map((r) => r.path);
+                window.dispatchEvent(
+                  new CustomEvent("docmind-start-summary", { detail: { paths } }),
+                );
+                window.dispatchEvent(new CustomEvent("docmind-open-qa"));
+              }}
+            >
+              生成摘要
+              {!isPro && (
+                <span
+                  className="chip chip-pro"
+                  style={{
+                    height: 14,
+                    padding: "0 4px",
+                    fontSize: 9,
+                    marginLeft: 4,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Pro
+                </span>
+              )}
+            </Button>
+          </Tooltip>
         </div>
       )}
 
