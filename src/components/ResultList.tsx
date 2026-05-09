@@ -9,6 +9,7 @@ import {
   FilePptOutlined,
   FileTextOutlined,
   FileMarkdownOutlined,
+  FileImageOutlined,
   FileOutlined,
   CopyOutlined,
   FolderOpenOutlined,
@@ -50,6 +51,13 @@ const FILE_TYPE_CONFIG: Record<string, { icon: React.ReactNode; color: string; l
   ppt:  { icon: <FilePptOutlined />,      color: "#ea580c", label: "PPT"  },
   txt:  { icon: <FileTextOutlined />,     color: "#64748b", label: "TXT"  },
   md:   { icon: <FileMarkdownOutlined />, color: "#7c3aed", label: "MD"   },
+  jpg:  { icon: <FileImageOutlined />,    color: "#db2777", label: "JPG"  },
+  jpeg: { icon: <FileImageOutlined />,    color: "#db2777", label: "JPEG" },
+  png:  { icon: <FileImageOutlined />,    color: "#db2777", label: "PNG"  },
+  bmp:  { icon: <FileImageOutlined />,    color: "#db2777", label: "BMP"  },
+  tiff: { icon: <FileImageOutlined />,    color: "#db2777", label: "TIFF" },
+  tif:  { icon: <FileImageOutlined />,    color: "#db2777", label: "TIF"  },
+  webp: { icon: <FileImageOutlined />,    color: "#db2777", label: "WEBP" },
 };
 
 function FileTypeIcon({ type }: { type: string }) {
@@ -80,7 +88,9 @@ const TYPE_GROUPS: { label: string; types: string[] }[] = [
   { label: "Word",  types: ["docx", "doc"] },
   { label: "Excel", types: ["xlsx", "xls", "csv"] },
   { label: "PPT",   types: ["pptx", "ppt"] },
-  { label: "文本",  types: ["txt", "md"] },
+  { label: "文本",  types: ["txt", "md", "rst"] },
+  { label: "图像",  types: ["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"] },
+  { label: "归档",  types: ["zip"] },
 ];
 
 type RowExtraProps = {
