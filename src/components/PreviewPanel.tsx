@@ -289,7 +289,7 @@ export default function PreviewPanel() {
           }}
         >
           <div className="section-label" style={{ marginBottom: 6 }}>
-            {isSemantic ? "Semantic Match" : "Keyword Match"}
+            {isSemantic ? "语义匹配" : "关键词匹配"}
           </div>
           <Typography.Text
             style={{ fontSize: 12, lineHeight: 1.7, display: "block", color: "var(--color-text)" }}

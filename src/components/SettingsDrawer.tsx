@@ -478,7 +478,7 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
           display: "flex", alignItems: "center", gap: 8,
         }}>
           <FolderOutlined style={{ color: "var(--color-text-secondary)", fontSize: 13 }} />
-          <span className="section-label">Watched Folders</span>
+          <span className="section-label">监听文件夹</span>
           <Button
             type="text"
             size="small"
@@ -646,7 +646,7 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
           display: "flex", alignItems: "center", gap: 8,
         }}>
           <FileSearchOutlined style={{ color: "var(--color-text-secondary)", fontSize: 13 }} />
-          <span className="section-label">File Types</span>
+          <span className="section-label">文件类型</span>
         </div>
 
         <div style={{ padding: "14px 16px" }}>
@@ -756,7 +756,7 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
           display: "flex", alignItems: "center", gap: 8,
         }}>
           <ThunderboltOutlined style={{ color: "var(--color-text-secondary)", fontSize: 13 }} />
-          <span className="section-label">Semantic Index</span>
+          <span className="section-label">语义索引</span>
         </div>
 
         <div style={{ padding: "14px 16px" }}>
@@ -806,7 +806,7 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
           display: "flex", alignItems: "center", gap: 8,
         }}>
           <BgColorsOutlined style={{ color: "var(--color-text-secondary)", fontSize: 13 }} />
-          <span className="section-label">Appearance</span>
+          <span className="section-label">外观</span>
         </div>
         <div style={{ padding: "14px 16px" }}>
           <div style={{ display: "flex", gap: 6 }}>
@@ -883,7 +883,7 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
           display: "flex", alignItems: "center", gap: 8,
         }}>
           <GlobalOutlined style={{ color: "var(--color-text-secondary)", fontSize: 13 }} />
-          <span className="section-label">Global Shortcut</span>
+          <span className="section-label">全局快捷键</span>
         </div>
         <div style={{ padding: "14px 16px" }}>
           <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 12, lineHeight: 1.6 }}>
@@ -960,7 +960,7 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
       <div style={{ marginBottom: 0, marginTop: 16, borderRadius: 8, border: "1px solid var(--color-border)", overflow: "hidden" }}>
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)", display: "flex", alignItems: "center", gap: 8 }}>
           <ReloadOutlined style={{ color: "var(--color-text-secondary)", fontSize: 13 }} />
-          <span className="section-label">Auto Re-index</span>
+          <span className="section-label">定时重索引</span>
         </div>
         <div style={{ padding: "14px 16px" }}>
           <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 12 }}>
@@ -1009,7 +1009,7 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
       <div style={{ marginTop: 16, borderRadius: 8, border: "1px solid var(--color-border)", overflow: "hidden" }}>
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)", display: "flex", alignItems: "center", gap: 8 }}>
           <DeleteOutlined style={{ color: "var(--color-text-secondary)", fontSize: 13 }} />
-          <span className="section-label">Excluded Directories</span>
+          <span className="section-label">排除目录</span>
         </div>
         <div style={{ padding: "14px 16px" }}>
           <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 10, lineHeight: 1.7 }}>

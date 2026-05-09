@@ -119,7 +119,7 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
 
         {/* Step indicator */}
         <div className="section-label" style={{ marginBottom: 8 }}>
-          Step 01
+          第 01 步
         </div>
         <Typography.Title
           level={3}

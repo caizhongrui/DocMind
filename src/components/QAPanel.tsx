@@ -400,7 +400,7 @@ export default function QAPanel() {
               }}
             >
               <div className="section-label" style={{ marginBottom: 10 }}>
-                Choose a Model
+                选择模型
               </div>
               <div>
                 {models.map((m) => (
@@ -652,7 +652,7 @@ export default function QAPanel() {
                   }}
                 >
                   <div className="section-label" style={{ marginBottom: 4 }}>
-                    You
+                    你
                   </div>
                   <div style={{ fontSize: 13, lineHeight: 1.6, color: "var(--color-text)", whiteSpace: "pre-wrap" }}>
                     {msg.content}
