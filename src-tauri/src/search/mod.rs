@@ -367,14 +367,15 @@ pub fn search_hybrid_for_rag(
             for (chunk_id, dist) in chunk_scores {
                 if dist > 0.9 { continue; }
                 let row = db.query_row(
-                    "SELECT c.content, f.id, f.path, f.file_type
+                    "SELECT c.content, c.chunk_index, f.id, f.path, f.file_type
                      FROM chunks c JOIN files f ON c.file_id = f.id
                      WHERE c.id = ?1",
                     rusqlite::params![chunk_id as i64],
                     |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?,
-                             r.get::<_, String>(2)?, r.get::<_, String>(3)?)),
+                             r.get::<_, i64>(2)?,
+                             r.get::<_, String>(3)?, r.get::<_, String>(4)?)),
                 );
-                if let Ok((content, file_id, path, file_type)) = row {
+                if let Ok((content, chunk_index, file_id, path, file_type)) = row {
                     // 跳过磁盘上已不存在的文件（文件被删除但 SQLite/向量库未及时清理时的兜底）
                     if !std::path::Path::new(&path).exists() { continue; }
                     // 跳过乱码内容：有效 CJK/ASCII 字符比例低于 50% 视为二进制垃圾
@@ -390,6 +391,8 @@ pub fn search_hybrid_for_rag(
                             name,
                             file_type,
                             score: 1.0 - dist,
+                            chunk_index,
+                            chunk_id: chunk_id as i64,
                         });
                     }
                 }
@@ -436,10 +439,12 @@ pub fn search_hybrid_for_rag(
 
             // 取该文件中所有包含查询词的 chunk（最多 3 个），而非只取第一个
             let mut stmt = db.prepare(
-                "SELECT content FROM chunks WHERE file_id = ?1 ORDER BY chunk_index"
+                "SELECT id, chunk_index, content FROM chunks WHERE file_id = ?1 ORDER BY chunk_index"
             )?;
-            let all_chunks: Vec<String> = stmt
-                .query_map(rusqlite::params![file_id as i64], |r| r.get(0))
+            let all_chunks: Vec<(i64, i64, String)> = stmt
+                .query_map(rusqlite::params![file_id as i64], |r| {
+                    Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
+                })
                 .map(|rows| rows.flatten().collect())
                 .unwrap_or_default();
 
@@ -447,7 +452,7 @@ pub fn search_hybrid_for_rag(
             if !std::path::Path::new(&path).exists() { continue; }
 
             let mut added = 0;
-            for content in &all_chunks {
+            for (cid, cidx, content) in &all_chunks {
                 if added >= 3 { break; }
                 // 跳过乱码内容
                 if is_garbage_content(content) { continue; }
@@ -464,6 +469,8 @@ pub fn search_hybrid_for_rag(
                         name: name.clone(),
                         file_type: file_type.clone(),
                         score: 0.5, // 初始分，后面会被关键词覆盖度重算
+                        chunk_index: *cidx,
+                        chunk_id: *cid,
                     });
                     added += 1;
                 }
@@ -513,6 +520,348 @@ pub fn search_hybrid_for_rag(
     Ok(chunks)
 }
 
+/// 同上,带 AppHandle,允许中间过程 emit 进度事件给前端。
+pub fn search_hybrid_for_rag_v2_with_progress(
+    query_str: &str,
+    state: &AppState,
+    max_chunks: usize,
+    app: &tauri::AppHandle,
+) -> Result<(Vec<RagChunk>, RecallStats)> {
+    use tauri::Emitter;
+    let pool_target = 50usize.max(max_chunks * 4);
+    let full_pool = search_hybrid_for_rag(query_str, state, pool_target * 2)?;
+    let initial_pool = full_pool.len();
+
+    let primary_take = pool_target.min(full_pool.len());
+    let mut primary: Vec<RagChunk> = full_pool[..primary_take].to_vec();
+
+    {
+        use std::collections::HashSet;
+        let mut seen_files: HashSet<u64> = primary.iter().map(|c| c.file_id).collect();
+        for c in full_pool.iter().skip(primary_take) {
+            if c.score < 0.10 { break; }
+            if seen_files.insert(c.file_id) {
+                primary.push(c.clone());
+            }
+        }
+    }
+    let after_threshold = primary.len();
+
+    // 让 UI 知道"开始精排"这一阶段(占总时间的大头)
+    let _ = app.emit("rag-stage", "✨ 正在精排候选片段…");
+
+    let reranker_state = run_reranker_in_place(query_str, &mut primary, state)
+        .unwrap_or("failed");
+
+    primary.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    primary.truncate(max_chunks);
+
+    let total_budget = max_chunks.saturating_mul(2).max(6);
+    let with_neighbors = {
+        let full = expand_with_neighbors(&primary, state)?;
+        if full.len() <= total_budget {
+            full
+        } else {
+            let mut v = full;
+            v.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            v.truncate(total_budget);
+            v.sort_by(|a, b| a.file_id.cmp(&b.file_id)
+                .then(a.chunk_index.cmp(&b.chunk_index)));
+            v
+        }
+    };
+    let files: std::collections::HashSet<u64> =
+        with_neighbors.iter().map(|c| c.file_id).collect();
+
+    let stats = RecallStats {
+        initial_pool,
+        after_threshold,
+        used: with_neighbors.len(),
+        files: files.len(),
+        reranker_state,
+    };
+    Ok((with_neighbors, stats))
+}
+
+/// V2 混合检索 — 治"答案不全 / 答非所问"。
+///
+/// 与 [`search_hybrid_for_rag`] 的区别：
+/// 1. 初筛池子从 ~max_chunks 提到 **50**(语义) + 50(BM25),覆盖更多候选
+/// 2. (可选)调用 BGE-reranker 对 cross-encoder 重排;失败/未下载时跳过
+/// 3. 每个"超过分数地板"的文件保底拿 1 个最佳 chunk,防止散在多文件
+///    的相关内容因全局排名不够高被整体抛弃
+/// 4. 命中 chunk 自动带上前后**邻居**(N-1, N+1),补全切片断裂导致的
+///    上下文丢失("第 7 条计算"在另一个 chunk 的场景)
+/// 5. 返回 [`RecallStats`] 供前端展示"已分析 X 段 / 还有 Y 段未引用"
+///
+/// `max_chunks` 是**最终送给 LLM** 的硬上限。中间召回池总是 50。
+pub fn search_hybrid_for_rag_v2(
+    query_str: &str,
+    state: &AppState,
+    max_chunks: usize,
+) -> Result<(Vec<RagChunk>, RecallStats)> {
+    // ── 1. 拿一个大池子(v1 内部已做 IDF 重排 + 阈值过滤),只调一次 ──
+    //   v1 阈值是 `max_score * 0.4` 配合绝对地板 0.12,我们要的是
+    //   "尽量多的真候选",而不是绕过那个阈值,所以直接放大 limit。
+    let pool_target = 50usize.max(max_chunks * 4);
+    let full_pool = search_hybrid_for_rag(query_str, state, pool_target * 2)?;
+    let initial_pool = full_pool.len();
+
+    // 主候选取前 pool_target 个(已按 IDF 加权分数降序)
+    let primary_take = pool_target.min(full_pool.len());
+    let mut primary: Vec<RagChunk> = full_pool[..primary_take].to_vec();
+
+    // ── 2. 每文件保底召回:扫剩下的尾巴,任何未在 primary 里出现过的
+    //      文件、且分数 >= 0.10 的,补 1 个 chunk 进来 ─────────────
+    {
+        use std::collections::HashSet;
+        let mut seen_files: HashSet<u64> = primary.iter().map(|c| c.file_id).collect();
+        for c in full_pool.iter().skip(primary_take) {
+            if c.score < 0.10 { break; } // v1 已降序,首次低于地板即可终止
+            if seen_files.insert(c.file_id) {
+                primary.push(c.clone());
+            }
+        }
+    }
+    let after_threshold = primary.len();
+
+    // ── 3. (可选)Cross-encoder reranker ───────────────────────────
+    //   bge-reranker-v2-m3 / base 拿 (query, passage) 对打分,比单 embedding
+    //   准很多。未下载时 state.reranker = None,自动跳过用 IDF 分。
+    let reranker_state = run_reranker_in_place(query_str, &mut primary, state)
+        .unwrap_or("failed");
+
+    // ── 4. 按(可能 rerank 后的)分数降序,截到 max_chunks ────────
+    primary.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    primary.truncate(max_chunks);
+
+    // ── 5. 邻居扩展 ─ 命中 chunk 自动带 N-1 / N+1 ────────────────
+    //   邻居本身不参与排序竞争,但**会膨胀总 chunk 数**,从而推高送进
+    //   LLM 的 prompt 长度。对 0.6B / 1.7B 这种小模型,长 prompt =
+    //   prefill 慢 = 用户感知"卡住"。所以加一个软上限:
+    //     - 总 chunk 数 ≤ max_chunks * 2
+    //   超过则把最低分的命中 chunk 的邻居丢掉(保留命中,牺牲邻居)。
+    let total_budget = max_chunks.saturating_mul(2).max(6);
+    let with_neighbors = {
+        let full = expand_with_neighbors(&primary, state)?;
+        if full.len() <= total_budget {
+            full
+        } else {
+            // 优先保留命中 chunk(score 高的 + 由 RAG 选出的),
+            // 邻居用 0.6× score 标记,排序后自然落后。
+            let mut v = full;
+            v.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            v.truncate(total_budget);
+            // 再按文件 + chunk_index 重排,保持段落顺序便于阅读
+            v.sort_by(|a, b| a.file_id.cmp(&b.file_id)
+                .then(a.chunk_index.cmp(&b.chunk_index)));
+            v
+        }
+    };
+    let files: std::collections::HashSet<u64> =
+        with_neighbors.iter().map(|c| c.file_id).collect();
+
+    let stats = RecallStats {
+        initial_pool,
+        after_threshold,
+        used: with_neighbors.len(),
+        files: files.len(),
+        reranker_state,
+    };
+    Ok((with_neighbors, stats))
+}
+
+/// 用 BGE-reranker 对 `chunks` 原地重打分,返回 reranker 实际运行状态字符串
+/// ("off" / "absent" / "ok" / "failed")。
+///
+/// 失败时 / reranker 未加载时返回 Ok(false),保持 chunks.score 不变,
+/// 调用方继续走 IDF 分数排序。
+///
+/// ## 为什么只对 top-N 跑 reranker
+/// 在 M1 Max 上 Xenova INT8 量化的 BGE-reranker-base 实测每对 215ms,
+/// 跑 10 对 → 2.1 秒,Tauri 命令同步返回,用户感受为"卡"。
+/// 砍到 top-5 → 1.1 秒,加上 retrieval + neighbor expand 总命令时间
+/// 控制在 1.5 秒以内。top-5 by IDF 已经覆盖了真正最相关的候选,
+/// 后面的 chunk 保留 IDF 分,但被 SHIFT 到 rerank 候选之下,排序自然落后。
+const RERANK_TOP_N: usize = 5;
+
+fn run_reranker_in_place(
+    query: &str,
+    chunks: &mut [RagChunk],
+    state: &AppState,
+) -> Result<&'static str> {
+    if chunks.is_empty() {
+        return Ok("absent");
+    }
+
+    // ── 紧急开关:用户在设置里勾掉"启用精排" → 直接跳过,即使模型已下载 ──
+    {
+        let db = state.db.lock().map_err(|_| anyhow::anyhow!("db lock"))?;
+        let enabled: String = db
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'reranker_enabled'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or_else(|_| "1".to_string());
+        if enabled == "0" {
+            eprintln!("[reranker] disabled by user setting, skipping");
+            return Ok("off");
+        }
+    }
+
+    let mut guard = state
+        .reranker
+        .lock()
+        .map_err(|_| anyhow::anyhow!("reranker lock"))?;
+    let reranker = match guard.as_mut() {
+        Some(r) => r,
+        None => return Ok("absent"), // 未下载,优雅降级
+    };
+
+    // chunks 已按 IDF 分数降序,取前 RERANK_TOP_N 个跑 cross-encoder
+    let n_rerank = chunks.len().min(RERANK_TOP_N);
+    let passages: Vec<String> = chunks[..n_rerank]
+        .iter()
+        .map(|c| c.content.chars().take(800).collect::<String>())
+        .collect();
+    let passage_refs: Vec<&str> = passages.iter().map(|s| s.as_str()).collect();
+
+    eprintln!("[reranker] starting batch of {} pairs", n_rerank);
+    let start = std::time::Instant::now();
+
+    // ── 单对带 timing,任何超 500ms 的都报警(帮助定位是哪些 chunk 出问题)
+    let mut rerank_scores: Vec<f32> = Vec::with_capacity(n_rerank);
+    for (i, p) in passage_refs.iter().enumerate() {
+        let t = std::time::Instant::now();
+        match reranker.score_one(query, p) {
+            Ok(s) => {
+                let ms = t.elapsed().as_millis();
+                if ms > 500 {
+                    eprintln!(
+                        "[reranker] WARN pair #{} took {}ms (passage len={})",
+                        i, ms, p.chars().count()
+                    );
+                }
+                rerank_scores.push(s);
+            }
+            Err(e) => {
+                eprintln!("[reranker] pair #{} FAILED: {e}; aborting batch, fallback to IDF", i);
+                return Ok("failed");
+            }
+        }
+        // 超过 20 秒总耗时就紧急中断,避免用户被卡住
+        if start.elapsed().as_secs() > 20 {
+            eprintln!(
+                "[reranker] total time exceeded 20s after {}/{}; aborting batch, fallback to IDF",
+                i + 1, n_rerank
+            );
+            return Ok("failed");
+        }
+    }
+
+    let elapsed_ms = start.elapsed().as_millis();
+    eprintln!(
+        "[reranker] scored {} candidates in {}ms ({}ms/pair)",
+        n_rerank,
+        elapsed_ms,
+        if n_rerank > 0 { elapsed_ms / n_rerank as u128 } else { 0 }
+    );
+
+    // 把 reranker 分数与 IDF 分数加权融合,并加 +10 偏移把 rerank 候选
+    // 推到一个 IDF 不可能达到的分数区间,确保它们排在尾部之前
+    for (c, rs) in chunks[..n_rerank].iter_mut().zip(rerank_scores.iter()) {
+        c.score = 10.0 + 0.75 * (*rs) + 0.25 * c.score;
+    }
+    Ok("ok")
+}
+
+/// 对每个命中 chunk 取前后邻居,合并去重后按 (file_id, chunk_index) 排序输出。
+fn expand_with_neighbors(
+    hits: &[RagChunk],
+    state: &AppState,
+) -> Result<Vec<RagChunk>> {
+    use std::collections::HashMap;
+    if hits.is_empty() {
+        return Ok(Vec::new());
+    }
+    let db = state.db.lock().map_err(|_| anyhow::anyhow!("db lock"))?;
+    // 为每个命中文件加载它的全部 (chunk_id, chunk_index, content) 一次,
+    // 后续按 index 邻接取数,避免对每个 hit 都单独 SQL。
+    let mut file_chunks: HashMap<u64, Vec<(i64, i64, String)>> = HashMap::new();
+    for h in hits {
+        if file_chunks.contains_key(&h.file_id) { continue; }
+        let mut stmt = db.prepare(
+            "SELECT id, chunk_index, content FROM chunks WHERE file_id = ?1 ORDER BY chunk_index",
+        )?;
+        let rows: Vec<(i64, i64, String)> = stmt
+            .query_map(rusqlite::params![h.file_id as i64], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
+            })
+            .map(|it| it.flatten().collect())
+            .unwrap_or_default();
+        file_chunks.insert(h.file_id, rows);
+    }
+
+    // 用 BTreeMap 保留 (file_id, chunk_index) 排序 + 去重
+    use std::collections::BTreeMap;
+    let mut merged: BTreeMap<(u64, i64), RagChunk> = BTreeMap::new();
+
+    for h in hits {
+        let key = (h.file_id, h.chunk_index);
+        merged.insert(key, RagChunk {
+            content: h.content.clone(),
+            file_id: h.file_id,
+            path: h.path.clone(),
+            name: h.name.clone(),
+            file_type: h.file_type.clone(),
+            score: h.score,
+            chunk_index: h.chunk_index,
+            chunk_id: h.chunk_id,
+        });
+        let neighbors_of = file_chunks.get(&h.file_id);
+        if let Some(all) = neighbors_of {
+            if let Some(pos) = all.iter().position(|(_, idx, _)| *idx == h.chunk_index) {
+                // 前一个
+                if pos > 0 {
+                    let (cid, idx, content) = &all[pos - 1];
+                    if !is_garbage_content(content) {
+                        merged.entry((h.file_id, *idx)).or_insert_with(|| RagChunk {
+                            content: content.clone(),
+                            file_id: h.file_id,
+                            path: h.path.clone(),
+                            name: h.name.clone(),
+                            file_type: h.file_type.clone(),
+                            // 邻居用命中分的 0.6 倍标记(纯展示,排序时不使用)
+                            score: h.score * 0.6,
+                            chunk_index: *idx,
+                            chunk_id: *cid,
+                        });
+                    }
+                }
+                // 后一个
+                if pos + 1 < all.len() {
+                    let (cid, idx, content) = &all[pos + 1];
+                    if !is_garbage_content(content) {
+                        merged.entry((h.file_id, *idx)).or_insert_with(|| RagChunk {
+                            content: content.clone(),
+                            file_id: h.file_id,
+                            path: h.path.clone(),
+                            name: h.name.clone(),
+                            file_type: h.file_type.clone(),
+                            score: h.score * 0.6,
+                            chunk_index: *idx,
+                            chunk_id: *cid,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(merged.into_values().collect())
+}
+
 /// 检测 chunk 内容是否为乱码/二进制垃圾。
 ///
 /// 两种检测策略：
@@ -557,6 +906,7 @@ fn is_garbage_content(text: &str) -> bool {
 }
 
 /// RAG 检索结果（chunk 级别）
+#[derive(Clone, Debug)]
 pub struct RagChunk {
     pub content: String,
     pub file_id: u64,
@@ -564,6 +914,29 @@ pub struct RagChunk {
     pub name: String,
     pub file_type: String,
     pub score: f32,
+    /// 该 chunk 在文件内的顺序索引（0-based）。-1 表示未知 / 邻居拼接得到。
+    pub chunk_index: i64,
+    /// 该 chunk 在 chunks 表中的主键 id。-1 表示未知 / 邻居拼接得到。
+    pub chunk_id: i64,
+}
+
+/// 多文档检索摘要(供前端展示"已分析 X 段 / 还有 Y 段未引用")
+#[derive(Clone, Debug, Default)]
+pub struct RecallStats {
+    /// 第一轮(语义 + BM25)合并去重后的候选总数
+    pub initial_pool: usize,
+    /// 经过阈值过滤后留下、实际进入精排候选的数量
+    pub after_threshold: usize,
+    /// 最终送入 LLM 上下文的 chunk 数
+    pub used: usize,
+    /// 涉及的不同文件数
+    pub files: usize,
+    /// reranker 实际运行状态:
+    /// - "off"     用户在设置里关闭了精排
+    /// - "absent"  reranker 模型未下载 / 未加载
+    /// - "ok"      精排成功跑完
+    /// - "failed"  精排尝试运行但中途出错(已 fallback 到 IDF)
+    pub reranker_state: &'static str,
 }
 
 #[cfg(test)]
@@ -584,12 +957,18 @@ mod tests {
             fts: Mutex::new(fts),
             vector_index: Mutex::new(None),
             embedder: Mutex::new(None),
+            reranker: Mutex::new(None),
+            reranker_dir: tmp.path().join("models").join("bge-reranker-v2-m3"),
             llm: Mutex::new(None),
             llm_loading: Mutex::new(()),
             model_dir: tmp.path().join("models"),
             vi_stamp_path: tmp.path().join("vi_stamp"),
             llm_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             api_llm_config: Arc::new(RwLock::new(crate::state::ApiLlmConfig::default())),
+            license: crate::license::state::shared(
+                crate::license::state::LicenseState::free(String::new(), "test"),
+            ),
+            app_data_dir: tmp.path().to_path_buf(),
         }
     }
 

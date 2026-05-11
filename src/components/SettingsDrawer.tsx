@@ -1,4 +1,4 @@
-import { Drawer, Button, Typography, Progress, message, Modal, Statistic, InputNumber, Space } from "antd";
+import { Drawer, Button, Typography, Progress, message, Modal, Statistic, InputNumber, Space, Switch } from "antd";
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -93,6 +93,70 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
   // ── 文件类型过滤 ──
   const [enabledTypes, setEnabledTypes] = useState<string[]>([...ALL_TYPES]);
   const [savingTypes, setSavingTypes] = useState(false);
+
+  // ── 答案精排模型(可选)──
+  //   未下载时 available=false,问答管线降级到 IDF 排序;
+  //   下载完后客户端自动热加载,无需重启。
+  const [rerankerStatus, setRerankerStatus] = useState<{
+    available: boolean;
+    loaded: boolean;
+    model_version: string;
+  } | null>(null);
+  const [rerankerDownloading, setRerankerDownloading] = useState(false);
+  const [rerankerProgress, setRerankerProgress] = useState<{ file: string; done: number; total: number } | null>(null);
+  // 紧急开关:某些机器上 BERT 系 ONNX 在 ort 2.0-rc.11 下会卡住或异常慢,
+  // 用户可一键关掉而不删除模型文件。默认开启。
+  const [rerankerEnabled, setRerankerEnabled] = useState(true);
+
+  const loadRerankerStatus = useCallback(() => {
+    invoke<{ available: boolean; loaded: boolean; model_dir: string; model_version: string }>("get_reranker_status")
+      .then(setRerankerStatus)
+      .catch(() => setRerankerStatus(null));
+  }, []);
+
+  useEffect(() => {
+    loadRerankerStatus();
+    invoke<string | null>("get_setting", { key: "reranker_enabled" })
+      .then((v) => setRerankerEnabled(v !== "0"))
+      .catch(() => setRerankerEnabled(true));
+    const unlisten = listen<{ file: string; done: number; total: number }>(
+      "reranker-download-progress",
+      (e) => setRerankerProgress(e.payload),
+    );
+    const unReady = listen("reranker-ready", () => {
+      setRerankerDownloading(false);
+      setRerankerProgress(null);
+      loadRerankerStatus();
+      message.success("答案精排模型已就绪");
+    });
+    return () => {
+      unlisten.then((u) => u());
+      unReady.then((u) => u());
+    };
+  }, [loadRerankerStatus]);
+
+  const handleDownloadReranker = () => {
+    setRerankerDownloading(true);
+    setRerankerProgress(null);
+    invoke("download_reranker")
+      .catch((e: unknown) => {
+        message.error(`下载失败：${e instanceof Error ? e.message : String(e)}`);
+        setRerankerDownloading(false);
+        setRerankerProgress(null);
+      });
+  };
+
+  const handleToggleRerankerEnabled = (checked: boolean) => {
+    setRerankerEnabled(checked);
+    invoke("set_setting", { key: "reranker_enabled", value: checked ? "1" : "0" })
+      .then(() => {
+        message.success(checked ? "已启用答案精排" : "已暂停答案精排,问答会回到 v0.1 召回质量");
+      })
+      .catch((e: unknown) => {
+        message.error(`保存失败：${e instanceof Error ? e.message : String(e)}`);
+        setRerankerEnabled(!checked); // 回滚 UI 状态
+      });
+  };
 
   const checkFolderConflict = (newPath: string, existingFolders: string[]): string | null => {
     const norm = (p: string) => p.endsWith("/") ? p : p + "/";
@@ -789,6 +853,116 @@ export default function SettingsDrawer({ open: drawerOpen, onClose }: Props) {
           >
             重建语义索引
           </Button>
+
+          {/* ── 答案精排模型(可选)─────────────────────────────
+              下载后 RAG 召回质量明显提升,治"答非所问 / 漏文件"。
+              不下载也不阻塞 — 管线优雅降级到 IDF 排序。 */}
+          <div
+            style={{
+              marginTop: 18,
+              paddingTop: 14,
+              borderTop: "1px dashed var(--color-border)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+              <Typography.Text strong style={{ fontSize: 13 }}>
+                答案精排模型
+              </Typography.Text>
+              {rerankerStatus?.loaded ? (
+                <span
+                  style={{
+                    background: "rgba(34,197,94,0.10)",
+                    color: "#16a34a",
+                    padding: "1px 8px",
+                    borderRadius: 4,
+                    fontSize: 11,
+                  }}
+                >
+                  已就绪
+                </span>
+              ) : (
+                <span
+                  style={{
+                    background: "rgba(148,163,184,0.15)",
+                    color: "var(--color-text-muted)",
+                    padding: "1px 8px",
+                    borderRadius: 4,
+                    fontSize: 11,
+                  }}
+                >
+                  未下载
+                </span>
+              )}
+            </div>
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 10, lineHeight: 1.6 }}>
+              用 BGE 精排模型(~80 MB)按"问题-段落"真实相关性重排,
+              显著减少"答非所问 / 漏掉相关文件"。可选下载,不下载也能正常用,
+              问答精度会略低一档。
+            </Typography.Text>
+
+            {rerankerDownloading && (
+              <div style={{ marginBottom: 12 }}>
+                <Typography.Text style={{ fontSize: 12, color: "var(--color-primary)" }}>
+                  {rerankerProgress
+                    ? `下载中：${rerankerProgress.file}（${(rerankerProgress.done / 1024 / 1024).toFixed(1)} / ${(rerankerProgress.total / 1024 / 1024).toFixed(1)} MB）`
+                    : "正在连接下载源..."}
+                </Typography.Text>
+                <Progress
+                  percent={
+                    rerankerProgress?.total
+                      ? Math.round((rerankerProgress.done / rerankerProgress.total) * 100)
+                      : 0
+                  }
+                  size="small"
+                  status="active"
+                  style={{ marginTop: 4 }}
+                />
+              </div>
+            )}
+
+            {!rerankerStatus?.available && (
+              <Button
+                type="primary"
+                ghost
+                size="small"
+                loading={rerankerDownloading}
+                onClick={handleDownloadReranker}
+                style={{ borderRadius: 8 }}
+              >
+                下载精排模型(~80 MB)
+              </Button>
+            )}
+            {rerankerStatus?.available && !rerankerStatus?.loaded && (
+              <Typography.Text type="warning" style={{ fontSize: 12 }}>
+                模型文件已存在但加载失败,请到模型目录检查,或删除后重新下载。
+              </Typography.Text>
+            )}
+
+            {/* 已下载情况下,允许一键暂停 — 应对 ONNX 在特定机器上卡住的 case */}
+            {rerankerStatus?.loaded && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  marginTop: 4,
+                }}
+              >
+                <Typography.Text style={{ fontSize: 12 }}>
+                  在问答中启用精排
+                  <Typography.Text type="secondary" style={{ display: "block", fontSize: 11, lineHeight: 1.5 }}>
+                    若问答出现长时间无响应,先在此关闭一键回退,问答恢复后再开启
+                  </Typography.Text>
+                </Typography.Text>
+                <Switch
+                  size="small"
+                  checked={rerankerEnabled}
+                  onChange={handleToggleRerankerEnabled}
+                />
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

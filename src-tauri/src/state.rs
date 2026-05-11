@@ -2,6 +2,7 @@ use crate::embedder::Embedder;
 use crate::indexer::tantivy_index::FtsIndex;
 use crate::license::SharedLicense;
 use crate::llm::Llm;
+use crate::reranker::Reranker;
 use crate::vector_index::VectorIndex;
 use rusqlite::Connection;
 use std::{
@@ -25,6 +26,10 @@ pub struct AppState {
     pub fts: Mutex<FtsIndex>,
     pub vector_index: Mutex<Option<VectorIndex>>,
     pub embedder: Mutex<Option<Embedder>>,
+    /// 答案精排模型(可选)。未下载时为 None,管线优雅跳过 rerank 步骤。
+    pub reranker: Mutex<Option<Reranker>>,
+    /// reranker 模型本地目录(无论是否已下载都保留路径,供前端 UI 引用)。
+    pub reranker_dir: PathBuf,
     pub llm: Mutex<Option<Llm>>,
     /// 序列化 LLM 加载操作，防止启动自动加载与手动切换并发导致 BackendAlreadyInitialized
     pub llm_loading: Mutex<()>,

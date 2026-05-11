@@ -1,6 +1,6 @@
 use crate::{
     llm::Llm,
-    search::search_hybrid_for_rag,
+    search::{search_hybrid_for_rag, search_hybrid_for_rag_v2, RecallStats},
     state::AppState,
 };
 use std::path::Path;
@@ -11,6 +11,99 @@ use tauri::{AppHandle, Emitter, Manager, State};
 struct RagContext {
     sources: Vec<SourceRef>,
     context_text: String,
+    /// 多文档检索 V2 的召回统计(老路径用 default,新路径返回真值)
+    stats: RecallStats,
+}
+
+/// V2 上下文构建:走 search_hybrid_for_rag_v2(top-50 + 每文件保底 + 邻居 +
+/// 可选 reranker),并返回召回统计供前端展示"已分析 X 段 · 涉及 Y 个文件"。
+///
+/// `app` 可选:传了就在中间阶段 emit 进度事件给前端,让 UI 实时显示
+/// "📋 检索中"/"✨ 精排中" 而不是干等"思考中..."。
+fn build_rag_context_v2(
+    question: &str,
+    state: &crate::state::AppState,
+    max_chunks: usize,
+    app: Option<&AppHandle>,
+) -> Result<RagContext, String> {
+    let (chunks, stats) = match app {
+        Some(handle) => crate::search::search_hybrid_for_rag_v2_with_progress(
+            question, state, max_chunks, handle,
+        ),
+        None => search_hybrid_for_rag_v2(question, state, max_chunks),
+    }.map_err(|e| e.to_string())?;
+
+    // 按文件名分组聚合上下文:同一份文档的多个 chunk **不再各自占一个
+    // 【来源:...】块**,否则小模型会把"5 段属于同一文档"误读成"5 份不同文档"。
+    //
+    // 输出形态:
+    //   === 文件 N: filename (共 X 个相关片段) ===
+    //   [片段 1] ...content...
+    //   [片段 2] ...content...
+    //
+    // chunk_index 仍保留在 RagChunk 里,以后做"点引用跳原文"时用,
+    // 只是不再喂给 LLM(因为小模型会照搬"#3"这种标签到输出)。
+    //
+    // ── 每段字符上限随 chunk 数量自适应 ────────────────────────
+    //   送 16 段 × 700 字 = 11000 字 → 5000+ tokens,加上 prompt
+    //   就 7000-8000 tokens,在 1.7B 上 prefill 要 10+ 秒,用户感知"卡"。
+    //   总预算约 6000 字(对 1.7B 友好),按 chunk 数均分,留 300-800 区间。
+    let per_chunk_budget: usize = if chunks.is_empty() {
+        700
+    } else {
+        (6000 / chunks.len()).clamp(300, 800)
+    };
+    let context_chunks: Vec<String> = {
+        use std::collections::HashMap;
+        // 用 Vec 维持首次出现的顺序(就是 RAG 排序后的相关性顺序)
+        let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
+        let mut name_to_idx: HashMap<String, usize> = HashMap::new();
+        for (i, c) in chunks.iter().enumerate() {
+            match name_to_idx.get(&c.name) {
+                Some(&gi) => groups[gi].1.push(i),
+                None => {
+                    name_to_idx.insert(c.name.clone(), groups.len());
+                    groups.push((c.name.clone(), vec![i]));
+                }
+            }
+        }
+
+        groups.iter().enumerate().map(|(gi, (name, idxs))| {
+            let snippets: Vec<String> = idxs.iter().enumerate().map(|(slot, &i)| {
+                let c = &chunks[i];
+                let text = if c.content.chars().count() > per_chunk_budget {
+                    c.content.chars().take(per_chunk_budget).collect::<String>() + "…"
+                } else {
+                    c.content.clone()
+                };
+                if idxs.len() > 1 {
+                    format!("[片段 {}]\n{}", slot + 1, text)
+                } else {
+                    text
+                }
+            }).collect();
+            let header = if idxs.len() > 1 {
+                format!("=== 文件 {}: {} (同一文件,共 {} 个相关片段) ===", gi + 1, name, idxs.len())
+            } else {
+                format!("=== 文件 {}: {} ===", gi + 1, name)
+            };
+            format!("{}\n{}", header, snippets.join("\n\n"))
+        }).collect()
+    };
+
+    let sources: Vec<SourceRef> = chunks.iter().map(|c| SourceRef {
+        name: c.name.clone(),
+        path: c.path.clone(),
+        snippet: c.content.chars().take(200).collect::<String>(),
+    }).collect();
+
+    let context_text = if context_chunks.is_empty() {
+        "（未找到相关文档）".to_string()
+    } else {
+        context_chunks.join("\n\n")
+    };
+
+    Ok(RagContext { sources, context_text, stats })
 }
 
 fn build_rag_context(
@@ -42,7 +135,7 @@ fn build_rag_context(
         context_chunks.join("\n\n")
     };
 
-    Ok(RagContext { sources, context_text })
+    Ok(RagContext { sources, context_text, stats: RecallStats::default() })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -405,6 +498,30 @@ pub struct SourceRef {
     pub snippet: String,
 }
 
+/// 召回完整性快照,用于前端展示"已分析 X 段 · 涉及 Y 个文件"
+/// 以及"还有 N 段未引用,点击展开"。
+#[derive(serde::Serialize, Clone, Default)]
+pub struct AskRecallInfo {
+    /// 第一轮检索得到的总候选数(去重 + 阈值过滤后)
+    pub initial_pool: usize,
+    /// 加上"每文件保底"补进来后的候选数
+    pub after_threshold: usize,
+    /// 最终送进 LLM context 的 chunk 数(含邻居扩展)
+    pub used: usize,
+    /// 涉及不同文件数
+    pub files: usize,
+    /// 精排实际状态:"off"/"absent"/"ok"/"failed"
+    pub reranker_state: String,
+}
+
+/// 启动一次流式问答后,后端立即返回的元数据。
+/// (sources + recall),前端在 token 流到达前可以先把信息块画出来。
+#[derive(serde::Serialize, Clone)]
+pub struct AskStreamStart {
+    pub sources: Vec<SourceRef>,
+    pub recall: AskRecallInfo,
+}
+
 /// 流式问答（支持多轮对话追问）：直接返回检索来源，通过 Tauri 事件逐 token 推送生成结果
 ///
 /// 返回值：Vec<SourceRef>（检索来源，供前端立即展示）
@@ -418,7 +535,7 @@ pub fn ask_question_stream(
     history: Option<Vec<HistoryMessage>>,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<Vec<SourceRef>, String> {
+) -> Result<AskStreamStart, String> {
     // Free-tier monthly quota check (no-op for Trial / Pro).
     crate::commands::license::consume_ai_quota(&app, &state)?;
 
@@ -445,24 +562,69 @@ pub fn ask_question_stream(
             None => return Err("LLM 未加载，请先在设置中选择并加载模型".to_string()),
         }
     };
-    // 2. 构建上下文文本和来源引用（每 chunk 限 700 字符）
-    let rag = build_rag_context(&retrieval_query, &state, max_chunks)?;
-    let RagContext { sources, context_text } = rag;
+
+    // 进度事件:让前端在等待 reranker / 检索 / LLM prefill 时能看到具体进展,
+    // 而不是干等"思考中...";前端监听 "rag-stage" 实时替换 assistant 占位文本。
+    let _ = app.emit("rag-stage", "📋 正在检索相关片段…");
+
+    // 2. 构建上下文文本和来源引用 — 走 V2 管线
+    //    (top-50 召回 + 每文件保底 + 邻居扩展 + 可选 reranker)
+    let rag = build_rag_context_v2(&retrieval_query, &state, max_chunks, Some(&app))?;
+    let RagContext { sources, context_text, stats } = rag;
+
+    // 检索完了,告诉用户接下来 LLM 要开工(prefill 是真正最慢的一步)
+    let _ = app.emit("rag-stage", "🤔 模型正在思考…");
 
     // [DEBUG] 打印 RAG 检索到的上下文
-    eprintln!("[RAG DEBUG] question={question:?}");
+    eprintln!(
+        "[RAG DEBUG] q={question:?} | pool={} after_floor={} used={} files={} rerank={}",
+        stats.initial_pool, stats.after_threshold, stats.used, stats.files, stats.reranker_state
+    );
     eprintln!("[RAG DEBUG] context=\n{context_text}");
 
-    // 5. 构建多轮对话 prompt — 强约束防止"答非所问"
+    // 5. 构建多轮对话 prompt — 强约束防止"答非所问 / 漏答 / 编造"
+    //
+    //   注意 prompt 里**绝不要用"文件名"、"编号"这种占位词**当模板,
+    //   小模型(0.6B / 1.7B / 4B)会直接照抄占位词作为输出,
+    //   导致答案里出现"根据《文件名 · #0》"这种 bug。
+    //   解决办法:用真实样子的具体例子,并显式禁止照抄占位词。
+    // ── 紧凑版 system prompt(原版 3000 字 → 现在 ~1200 字)──
+    //   为啥要瘦身:1.7B 模型有效 context ~4-8k tokens,大 prompt 会
+    //   显著拖慢 prefill,用户感知"卡住"。把核心规则保留,把多余的
+    //   示例砍掉(它们提升边际很小,但占了 1500+ 字)。
     let mut prompt = String::from(
         "<|im_start|>system\n\
-         你是一名严谨的文档助手。请严格按以下规则作答:\n\
-         1. 只使用「参考文档」段落中的内容,绝对不能调用你训练时学到的知识\n\
-         2. 如果参考文档里没有明确写出答案,直接回复「提供的文档中没有相关内容」,不要猜测、不要泛化\n\
-         3. 回答时必须引用具体文件名作为依据,例如:根据《xxx.docx》...\n\
-         4. 数字、日期、姓名、金额等关键事实必须与文档完全一致,不可改写\n\
-         5. 回答应当简洁直接,不重复问题,不输出与问题无关的内容\n\
-         6. 多份文档说法不一致时,按文件名分别列出各自说法\n\
+         你是文档助手。基于「参考文档」回答用户问题。每条规则都必须遵守。\n\
+         \n\
+         核心规则:\n\
+         1. **答案 = 内容 + 引用**:必须给出具体内容(数字/名称/句子),引用《文件名》是注脚,不是答案本身。只写文件名而不给内容 = 不合格。\n\
+         2. 只用「参考文档」,绝对不调用训练知识。文档里没写的 → 直接说「提供的文档中没有相关内容」,不要猜。\n\
+         3. 数字、日期、姓名、金额、税号、账号必须与原文字面**完全一致**。\n\
+         4. 「参考文档」按 `=== 文件 N: 文件名 ===` 分组,同一文件可能多个 `[片段 N]`。统计「几份」时**只数 `=== 文件 N ===` 头数**,不要把片段当文件。\n\
+         5. 问「X 是什么 / 内容 / 信息」→ 必须给出文档里的具体数据,不能只列文件名。\n\
+         6. 问「几份 / 哪些 X」(X 是类型)→ 严格按类型过滤:\n\
+           - 「合同 / 协议」 ≠ 「招标 / 投标 / 需求 / 方案 / 模板」\n\
+           - 文件名带「招标」「投标」「需求」的**不是**合同\n\
+         7. 多份文档讲**同一信息**(如同一家公司的开票信息)→ **合并列一次** + 文末写「以上信息见于:《f1》《f2》《f3》」。绝不要逐份重复 3-4 遍。\n\
+         8. 列表用标准 markdown `- `(短横线 + 空格),**不要用 `·` 中点**(会丢字)。\n\
+         9. 引用文件名用 `《文件名.ext》`,不要 `【...】`、不要 `=== 文件 N: ===`,不要占位词「文件名」「文档1」。\n\
+         10. 不要用「...」「等等」「以下省略」「同上」代替具体内容。\n\
+         11. 多份文档说法**不一致**时,共同部分列一遍,差异点分别说明哪份文档说什么。\n\
+         12. 不重复问题、不输出「好的」「很高兴帮你」等礼貌套话。\n\
+         \n\
+         好答案示例(用户问「博约云开票信息」,4 份文档基本一致):\n\
+         > 博约云的开票信息如下:\n\
+         > - 公司名称:青岛博约云信息科技有限公司\n\
+         > - 税号:91370214MA94LP7X4G\n\
+         > - 开户行:青岛银行股份有限公司深圳路支行\n\
+         > - 账号:802920200158066\n\
+         > 以上信息见于:《外包协议.doc》《开票信息.docx》《投标文件.doc》《硬件合同.docx》。\n\
+         \n\
+         坏答案示例(必须避免):\n\
+         - 只回文件名 → 「《xxx.doc》」(空答案)\n\
+         - 逐份列同样信息 4 遍 → 「《f1》:开票信息...《f2》:开票信息...」(噪声)\n\
+         - 把招标 / 投标错算成合同 → 「6 份合同」(实际只有 1 份合同)\n\
+         - 凭训练知识补 → 「应该是 2024 年」(应说「提供的文档中没有相关内容」)\n\
          <|im_end|>\n"
     );
 
@@ -516,7 +678,16 @@ pub fn ask_question_stream(
         }
     });
 
-    Ok(sources)
+    Ok(AskStreamStart {
+        sources,
+        recall: AskRecallInfo {
+            initial_pool: stats.initial_pool,
+            after_threshold: stats.after_threshold,
+            used: stats.used,
+            files: stats.files,
+            reranker_state: stats.reranker_state.to_string(),
+        },
+    })
 }
 
 /// 限定文档范围的流式问答(NotebookLM 模式)。
@@ -830,7 +1001,7 @@ pub async fn ask_question_stream_api(
     };
 
     let rag = build_rag_context(&retrieval_query, &state, 5)?;
-    let RagContext { sources, context_text } = rag;
+    let RagContext { sources, context_text, stats: _ } = rag;
 
     // 构建 messages 数组（OpenAI 格式）
     let mut messages: Vec<serde_json::Value> = vec![

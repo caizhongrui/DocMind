@@ -22,12 +22,43 @@ const TOKENIZER_URLS: &[&str] = &[
     "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/tokenizer.json",
 ];
 
+// ── BGE Reranker(可选答案精排模型,~80MB INT8 量化版)─────────────
+//   bge-reranker-base 是 Xenova 在 Hugging Face 上的现成 ONNX 版本,
+//   含 model_quantized.onnx(INT8, ~80MB)和 tokenizer.json。
+//   中文 + 多语言效果在 80MB 这个尺寸里属于第一档。
+const RERANKER_VERSION: &str = "bge-reranker-base";
+const RERANKER_DIR_NAME: &str = "bge-reranker-v2-m3"; // 沿用之前定义的目录名,保持兼容
+const RERANKER_ONNX_URLS: &[&str] = &[
+    "https://hf-mirror.com/Xenova/bge-reranker-base/resolve/main/onnx/model_quantized.onnx",
+    "https://modelscope.cn/models/Xenova/bge-reranker-base/resolve/master/onnx/model_quantized.onnx",
+    "https://www.modelscope.cn/models/Xenova/bge-reranker-base/resolve/master/onnx/model_quantized.onnx",
+    "https://huggingface.co/Xenova/bge-reranker-base/resolve/main/onnx/model_quantized.onnx",
+];
+const RERANKER_TOKENIZER_URLS: &[&str] = &[
+    "https://hf-mirror.com/Xenova/bge-reranker-base/resolve/main/tokenizer.json",
+    "https://modelscope.cn/models/Xenova/bge-reranker-base/resolve/master/tokenizer.json",
+    "https://www.modelscope.cn/models/Xenova/bge-reranker-base/resolve/master/tokenizer.json",
+    "https://huggingface.co/Xenova/bge-reranker-base/resolve/main/tokenizer.json",
+];
+
 #[derive(Serialize, Clone)]
 pub struct ModelStatus {
     pub available: bool,
     pub model_dir: String,
     pub model_version: String,
     pub embedding_count: i64, // 已生成的 embedding 数量（0 = 需要重新索引）
+}
+
+/// Reranker(答案精排)模型的就绪状态。前端用它决定是否弹"下载精排模型"
+/// 的提示横幅,以及在设置里展示按钮。
+#[derive(Serialize, Clone)]
+pub struct RerankerStatus {
+    /// 本地是否就绪(model + tokenizer 都存在)
+    pub available: bool,
+    /// 运行时是否已加载到 AppState(可能本地存在但加载失败)
+    pub loaded: bool,
+    pub model_dir: String,
+    pub model_version: String,
 }
 
 #[tauri::command]
@@ -156,6 +187,151 @@ async fn download_file_with_fallback(
     }
     Err(format!("所有下载源均失败：{last_err}"))
 }
+
+// ─── BGE Reranker ───────────────────────────────────────────────────────
+
+/// Reranker 状态查询(前端启动后调用一次,决定是否弹下载横幅)。
+#[tauri::command]
+pub fn get_reranker_status(state: State<'_, AppState>) -> RerankerStatus {
+    let available = crate::reranker::Reranker::is_available(&state.reranker_dir);
+    let loaded = state
+        .reranker
+        .lock()
+        .ok()
+        .map(|g| g.is_some())
+        .unwrap_or(false);
+    RerankerStatus {
+        available,
+        loaded,
+        model_dir: state.reranker_dir.to_string_lossy().to_string(),
+        model_version: RERANKER_VERSION.to_string(),
+    }
+}
+
+/// 下载 BGE-reranker(progress 事件 "reranker-download-progress")。
+/// 下载完成后热加载到 AppState,前端立即可用,无需重启。
+#[tauri::command]
+pub async fn download_reranker(app: AppHandle) -> Result<(), String> {
+    let reranker_dir = {
+        let state = app.state::<AppState>();
+        state.reranker_dir.clone()
+    };
+
+    std::fs::create_dir_all(&reranker_dir).map_err(|e| e.to_string())?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(900))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // 小文件先(tokenizer ~5MB)
+    download_with_progress_event(
+        &client,
+        RERANKER_TOKENIZER_URLS,
+        &reranker_dir.join("tokenizer.json"),
+        &app,
+        "tokenizer.json",
+        "reranker-download-progress",
+    )
+    .await?;
+
+    // 大文件(INT8 量化 ONNX ~80MB)
+    download_with_progress_event(
+        &client,
+        RERANKER_ONNX_URLS,
+        &reranker_dir.join("model_quantized.onnx"),
+        &app,
+        "model_quantized.onnx",
+        "reranker-download-progress",
+    )
+    .await?;
+
+    // 下载完毕,热加载 + 立即 warmup(避免用户首次问答承担冷启动延迟)
+    {
+        let state = app.state::<AppState>();
+        match crate::reranker::Reranker::load(&state.reranker_dir) {
+            Ok(mut r) => {
+                r.warmup(); // 同步,~1-2 秒;下载完已经在等了,多 2 秒可接受
+                let mut guard = state
+                    .reranker
+                    .lock()
+                    .map_err(|_| "reranker lock poisoned".to_string())?;
+                *guard = Some(r);
+                let _ = app.emit("reranker-ready", RERANKER_VERSION);
+                Ok(())
+            }
+            Err(e) => Err(format!("加载 reranker 失败：{e}")),
+        }
+    }
+}
+
+/// 在 download_file 之上加一个 event-name 参数版本,这样 reranker 用
+/// 自己的 progress 事件名,不会和 embedder 模型的 progress 冲突。
+async fn download_with_progress_event(
+    client: &reqwest::Client,
+    urls: &[&str],
+    dest: &std::path::Path,
+    app: &AppHandle,
+    filename: &str,
+    event_name: &str,
+) -> Result<(), String> {
+    let mut last_err = String::new();
+    for &url in urls {
+        match download_one_url(client, url, dest, app, filename, event_name).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                eprintln!("[reranker] download failed from {url}: {e}, trying next source...");
+                last_err = e;
+                let _ = std::fs::remove_file(dest);
+            }
+        }
+    }
+    Err(format!("所有下载源均失败：{last_err}"))
+}
+
+async fn download_one_url(
+    client: &reqwest::Client,
+    url: &str,
+    dest: &std::path::Path,
+    app: &AppHandle,
+    filename: &str,
+    event_name: &str,
+) -> Result<(), String> {
+    use std::io::Write;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("request error: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    let total = resp.content_length().unwrap_or(0);
+    let mut downloaded: u64 = 0;
+    let mut file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
+    let mut response = resp;
+    loop {
+        let chunk = response
+            .chunk()
+            .await
+            .map_err(|e| format!("chunk error: {e}"))?;
+        let Some(bytes) = chunk else { break };
+        file.write_all(&bytes).map_err(|e| e.to_string())?;
+        downloaded += bytes.len() as u64;
+        let _ = app.emit(
+            event_name,
+            serde_json::json!({
+                "file": filename,
+                "done": downloaded,
+                "total": total,
+            }),
+        );
+    }
+    file.flush().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ────────────────────────────────────────────────────────────────────────
 
 async fn download_file(
     client: &reqwest::Client,

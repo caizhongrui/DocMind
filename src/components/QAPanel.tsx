@@ -28,7 +28,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { useState, useEffect, useRef } from "react";
-import type { SourceRef, Message, GgufModelInfo } from "../types";
+import type { SourceRef, Message, GgufModelInfo, AskStreamStart } from "../types";
 import { invokePro, localizeError } from "../stores/licenseStore";
 import { useSelectionStore } from "../stores/selectionStore";
 
@@ -70,6 +70,19 @@ export default function QAPanel() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [asking, setAsking] = useState(false);
+  // RAG 进度阶段:后端在检索 / 精排 / 准备上下文每个阶段会 emit `rag-stage`
+  // 事件,前端实时把这段文字显示在"思考中…"占位上,让用户知道**正在做啥**,
+  // 不至于盯着一动不动的"思考中…"产生"是不是卡死了"的焦虑。
+  const [ragStage, setRagStage] = useState<string | null>(null);
+  // asking 卡死保护:60 秒后端没回应就强制复位,避免一个挂掉的请求让
+  // 后续所有发送按钮都失灵
+  const askingWatchdogRef = useRef<number | null>(null);
+  const clearAskingWatchdog = () => {
+    if (askingWatchdogRef.current != null) {
+      window.clearTimeout(askingWatchdogRef.current);
+      askingWatchdogRef.current = null;
+    }
+  };
   const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set());
   const [continuous, setContinuous] = useState(true);
 
@@ -238,7 +251,15 @@ export default function QAPanel() {
       if (total > 0) setDownloadProgress(Math.round((done / total) * 100));
     });
 
+    const pStage = listen<string>("rag-stage", (ev) => {
+      // 收到任何阶段消息说明后端在干活,占位文本从"思考中..."切到具体阶段
+      setRagStage(ev.payload);
+    });
+
     const p2 = listen<string>("ask-token", (ev) => {
+      // 第一个真实 token 一到,RAG 阶段彻底结束,清掉 stage 让 markdown 接管
+      clearAskingWatchdog();
+      setRagStage(null);
       setMessages((prev) => {
         const msgs = [...prev];
         const last = msgs[msgs.length - 1];
@@ -250,7 +271,9 @@ export default function QAPanel() {
     });
 
     const p3 = listen<null>("ask-done", () => {
+      clearAskingWatchdog();
       setAsking(false);
+      setRagStage(null);
       setMessages((prev) => {
         const msgs = [...prev];
         const last = msgs[msgs.length - 1];
@@ -262,6 +285,8 @@ export default function QAPanel() {
     });
 
     const p4 = listen<string>("ask-error", (ev) => {
+      clearAskingWatchdog();
+      setRagStage(null);
       setMessages((prev) => {
         const msgs = [...prev];
         const last = msgs[msgs.length - 1];
@@ -278,15 +303,22 @@ export default function QAPanel() {
       setAsking(false);
     });
 
+    // 所有 unlisten 都 swallow 错误 —— Tauri 2 + React StrictMode 在 dev
+    // 下 useEffect 会双重运行,清理函数也被调用两次,第二次会触发
+    // `listeners[eventId].handlerId` undefined。无害,但会污染 console
+    // 掩盖真正的错误。
+    const safeUnlisten = (p: Promise<() => void>) =>
+      p.then((fn) => fn()).catch(() => {});
     return () => {
-      pAutoLoaded.then((fn) => fn());
-      pAutoFailed.then((fn) => fn());
-      pLoaded.then((fn) => fn());
-      pLoadFailed.then((fn) => fn());
-      p0.then((fn) => fn());
-      p2.then((fn) => fn());
-      p3.then((fn) => fn());
-      p4.then((fn) => fn());
+      safeUnlisten(pAutoLoaded);
+      safeUnlisten(pAutoFailed);
+      safeUnlisten(pLoaded);
+      safeUnlisten(pLoadFailed);
+      safeUnlisten(p0);
+      safeUnlisten(pStage);
+      safeUnlisten(p2);
+      safeUnlisten(p3);
+      safeUnlisten(p4);
     };
   }, []);
 
@@ -382,25 +414,67 @@ export default function QAPanel() {
     ]);
     setInput("");
     setAsking(true);
+    // 立即给一个"正在准备"占位,让用户**点击发送的瞬间就看到反馈**,
+    // 而不是干等几秒后端事件先到才有反应
+    setRagStage("📋 正在准备…");
+
+    // 强制 React 把上面 4 个 setState 先 flush + 让浏览器 paint 一帧,
+    // 再启动 invoke。否则 invoke 的同步 IPC 序列化会跟 React 渲染挤在同
+    // 一帧里,用户会感觉"点了之后等了一下才看到自己的问题气泡"。
+    // 两次 rAF 保证一帧渲染 + 一帧 paint 都做完才进 invoke。
+
+    // 安全网:如果后端 60 秒后都没有 ask-token / ask-done / ask-error 任何
+    // 一个事件(reranker 死锁 / LLM 崩溃 / 任何挂起),自动把 asking 复位,
+    // 用户至少能继续问下一个。
+    const asking_watchdog = window.setTimeout(() => {
+      setAsking(false);
+      setRagStage(null);
+      setMessages((prev) => {
+        const msgs = [...prev];
+        const last = msgs[msgs.length - 1];
+        if (last?.role === "assistant" && last.streaming && !last.content) {
+          msgs[msgs.length - 1] = {
+            ...last,
+            content: "60 秒未收到响应。请检查模型是否正常,或在设置里关闭精排试试。",
+            error: true,
+            streaming: false,
+          };
+        }
+        return msgs;
+      });
+    }, 60000);
+    // 任何流事件到达都取消看门狗(在 .then/.catch 里完成)
+    askingWatchdogRef.current = asking_watchdog;
 
     // If the user has scoped this conversation to a set of documents
     // (via the result-list batch toolbar), route to ask_question_scoped
     // so the LLM only sees those files. Otherwise the global RAG path.
     const scope = useSelectionStore.getState().scopeFiles;
-    const cmd = scope.length > 0 ? "ask_question_scoped" : "ask_question_stream";
+    const isScoped = scope.length > 0;
+    const cmd = isScoped ? "ask_question_scoped" : "ask_question_stream";
     const args: Record<string, unknown> = { question: q, history };
-    if (scope.length > 0) args.paths = scope.map((s) => s.path);
+    if (isScoped) args.paths = scope.map((s) => s.path);
 
-    invokePro<SourceRef[]>(cmd, args)
-      .then((sources) => {
+    // 全库问答返回 AskStreamStart {sources, recall};scoped 仍返回 SourceRef[]。
+    // 用 unknown 收回再分支处理,保持类型干净。
+    // 双 rAF 让 React 渲染 + 浏览器 paint 都先完成,确保用户气泡和占位
+    // 立刻可见,再让 invoke 的 IPC 序列化进事件循环
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+    invokePro<AskStreamStart | SourceRef[]>(cmd, args)
+      .then((res) => {
+        const sources: SourceRef[] = Array.isArray(res) ? res : res.sources;
+        const recall = !Array.isArray(res) ? res.recall : undefined;
         setMessages((prev) => {
           const msgs = [...prev];
           const last = msgs[msgs.length - 1];
-          if (last?.role === "assistant") msgs[msgs.length - 1] = { ...last, sources };
+          if (last?.role === "assistant")
+            msgs[msgs.length - 1] = { ...last, sources, recall };
           return msgs;
         });
       })
       .catch((e: unknown) => {
+        clearAskingWatchdog();
+        setRagStage(null);
         setMessages((prev) => {
           const msgs = [...prev];
           const last = msgs[msgs.length - 1];
@@ -410,6 +484,7 @@ export default function QAPanel() {
         });
         setAsking(false);
       });
+    }));
   };
 
   const handleExportConversation = async () => {
@@ -810,10 +885,94 @@ export default function QAPanel() {
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                     ) : (
                       <span style={{ color: "var(--color-text-muted)", fontStyle: "italic", fontSize: 12 }}>
-                        思考中…
+                        {/* 只让最后一条 assistant 占位用 ragStage,历史消息保持静态 */}
+                        {i === messages.length - 1 && msg.streaming && ragStage
+                          ? ragStage
+                          : "思考中…"}
                       </span>
                     )}
                   </div>
+
+                  {/* 召回完整性提示行 — 让用户立刻看到"我读了多少 / 涉及哪几份",
+                      也明确告诉是否启用了精排。直接放在答案下、参考来源上方,
+                      节奏上"答案完了就交代一下我读了什么"。 */}
+                  {msg.recall && msg.recall.used > 0 && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        gap: 8,
+                        fontSize: 11,
+                        color: "var(--color-text-muted)",
+                        marginTop: 2,
+                      }}
+                    >
+                      <span>
+                        ✓ 已分析 <b>{msg.recall.used}</b> 段 · 涉及{" "}
+                        <b>{msg.recall.files}</b> 份文件
+                      </span>
+                      {msg.recall.initial_pool > msg.recall.used && (
+                        <span style={{ color: "var(--color-text-muted)" }}>
+                          (检索到 {msg.recall.initial_pool} 段,精选了 {msg.recall.used} 段送入回答)
+                        </span>
+                      )}
+                      {(() => {
+                        // 四种 reranker 状态对应四种 UI 反馈
+                        // ok      → 蓝色高亮 ✨ 已精排
+                        // off     → 灰色"已在设置中关闭"
+                        // absent  → 灰色"未下载精排模型"
+                        // failed  → 黄色警示"精排出错"(给用户去关或排查的信号)
+                        const state = msg.recall?.reranker_state || "absent";
+                        if (state === "ok") {
+                          return (
+                            <span
+                              style={{
+                                background: "rgba(99, 102, 241, 0.08)",
+                                color: "var(--color-primary, #6366f1)",
+                                padding: "1px 6px",
+                                borderRadius: 4,
+                                fontSize: 10,
+                              }}
+                              title="使用 BGE 精排模型按 (query, passage) 真实相关性重排"
+                            >
+                              ✨ 已精排
+                            </span>
+                          );
+                        }
+                        if (state === "failed") {
+                          return (
+                            <span
+                              style={{
+                                background: "rgba(245, 158, 11, 0.12)",
+                                color: "#d97706",
+                                padding: "1px 6px",
+                                borderRadius: 4,
+                                fontSize: 10,
+                              }}
+                              title="精排模型运行出错(已回退到基础召回)。建议在设置里关掉精排,或检查日志"
+                            >
+                              ⚠️ 精排出错(已回退)
+                            </span>
+                          );
+                        }
+                        if (state === "off") {
+                          return (
+                            <span style={{ color: "var(--color-text-muted)", fontSize: 10 }}
+                              title="你在设置中关闭了精排,问答使用基础召回">
+                              已关闭精排
+                            </span>
+                          );
+                        }
+                        return (
+                          <span style={{ color: "var(--color-text-muted)", fontSize: 10 }}
+                            title="精排模型未下载,问答使用基础召回。下载后效果更好">
+                            未启用精排
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  )}
 
                   {msg.sources && msg.sources.length > 0 && (
                     <div>

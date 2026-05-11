@@ -4,6 +4,7 @@ mod embedder;
 mod indexer;
 mod license;
 mod llm;
+mod reranker;
 mod search;
 mod state;
 mod vector_index;
@@ -145,6 +146,28 @@ pub fn run() {
                 None
             };
 
+            // Reranker:与 embedder 相比是**可选**增强 —— 没下载也不阻塞,
+            // 管线在 search_hybrid_for_rag_v2 里检测到 None 时自动跳过 rerank。
+            let reranker_dir = data_dir.join("models").join("bge-reranker-v2-m3");
+            let reranker = if reranker::Reranker::is_available(&reranker_dir) {
+                match reranker::Reranker::load(&reranker_dir) {
+                    Ok(mut r) => {
+                        println!("[reranker] loaded bge-reranker-v2-m3 from {}", reranker_dir.display());
+                        // 触发一次空推理,把 ONNX graph JIT 编译的冷启动放到
+                        // 启动期吃掉,而不是用户第一次问答时再吃 1-3 秒延迟
+                        r.warmup();
+                        Some(r)
+                    }
+                    Err(e) => {
+                        eprintln!("[reranker] failed to load: {e} -- rerank disabled, falling back to IDF-only");
+                        None
+                    }
+                }
+            } else {
+                println!("[reranker] model not found at {}, rerank disabled (search uses IDF fallback)", reranker_dir.display());
+                None
+            };
+
             // stamp 文件路径提前定义，供 AppState 使用（无论 embedder 是否可用）
             let vi_stamp_path = data_dir.join("index").join("vi_stamp");
             let vector_index = if embedder.is_some() {
@@ -249,6 +272,8 @@ pub fn run() {
                 fts: Mutex::new(fts),
                 vector_index: Mutex::new(vector_index),
                 embedder: Mutex::new(embedder),
+                reranker: Mutex::new(reranker),
+                reranker_dir,
                 llm: Mutex::new(None),
                 llm_loading: Mutex::new(()),
                 model_dir,
@@ -425,6 +450,8 @@ pub fn run() {
             commands::updater::check_update,
             commands::model::get_model_status,
             commands::model::download_model,
+            commands::model::get_reranker_status,
+            commands::model::download_reranker,
             commands::settings::read_binary_preview,
             commands::llm::list_available_gguf_models,
             commands::llm::download_gguf_model,

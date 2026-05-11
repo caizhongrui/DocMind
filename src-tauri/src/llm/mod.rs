@@ -3,11 +3,12 @@
 // Windows / Linux：CPU 推理（with_n_gpu_layers = 0）
 
 use anyhow::{anyhow, Result};
+use encoding_rs::UTF_8;
 use llama_cpp_2::{
     context::params::LlamaContextParams,
     llama_backend::LlamaBackend,
     llama_batch::LlamaBatch,
-    model::{params::LlamaModelParams, AddBos, LlamaModel, Special},
+    model::{params::LlamaModelParams, AddBos, LlamaModel},
     sampling::LlamaSampler,
 };
 use std::{num::NonZero, path::Path};
@@ -105,6 +106,14 @@ impl Llm {
         let mut token = sampler.sample(&ctx, last_batch_idx);
         let mut n_cur = n_prompt;
 
+        // 关键:跨 token 持有同一个 UTF-8 decoder。
+        //   Qwen3 的 tokenizer 把单个汉字(3 字节)经常拆成 2-3 个 byte-level
+        //   token。如果每次都 `token_to_str` 新建 decoder,半截字节会被
+        //   replacement-char 化或直接丢失,导致"公司"→"司"、"税号"→"号"
+        //   这种首字丢失。`token_to_piece` 接受外部 decoder,partial bytes
+        //   在 decoder state 里保留,等下一个 token 把字补全。
+        let mut decoder = UTF_8.new_decoder();
+
         loop {
             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 break;
@@ -112,14 +121,25 @@ impl Llm {
             if token == eos || n_cur >= n_prompt + max_new_tokens {
                 break;
             }
-            let piece = self
+            // **不要直接用 `token_to_piece`**:它内部 `String::with_capacity(bytes.len())`,
+            // 当一个 token 只贡献 1 字节(比如 Qwen 把"公"E5,85,AC 拆成 [...85] 和 [AC]
+            // 两个 token,后者只 1 字节),decoder 要输出"公"3 字节,但 String 只有 1 字节
+            // 容量 → `OutputFull` → 字节被丢 → "公"消失。
+            //
+            // 自己手动 token_to_bytes + 给 String 留充裕 capacity(32 字节,足够
+            // 容纳累计缓存 + 当前 token 的所有可能输出),完美绕过这个 bug。
+            let piece_bytes = self
                 .model
-                .token_to_str(token, Special::Plaintext)
-                .map_err(|e| anyhow!("token_to_str error: {e}"))?;
+                .token_to_bytes(token, llama_cpp_2::model::Special::Plaintext)
+                .map_err(|e| anyhow!("token_to_bytes error: {e}"))?;
+            let mut piece = String::with_capacity(piece_bytes.len() + 16);
+            let _ = decoder.decode_to_string(&piece_bytes, &mut piece, /* last= */ false);
             if piece == "<|im_end|>" || piece == "<|endoftext|>" {
                 break;
             }
-            on_token(&piece);
+            if !piece.is_empty() {
+                on_token(&piece);
+            }
             sampler.accept(token);
             batch.clear();
             batch
@@ -129,6 +149,14 @@ impl Llm {
                 .map_err(|e| anyhow!("decode error: {e}"))?;
             n_cur += 1;
             token = sampler.sample(&ctx, 0);
+        }
+
+        // 循环结束时,如果 decoder 里还有 buffered 字节(不太可能,但保险),
+        // 给它一个机会冲刷出来
+        let mut tail = String::new();
+        let _ = decoder.decode_to_string(&[], &mut tail, /* last= */ true);
+        if !tail.is_empty() {
+            on_token(&tail);
         }
 
         Ok(())
@@ -181,14 +209,20 @@ impl Llm {
         let mut token = sampler.sample(&ctx, last_batch_idx);
         let mut n_cur = n_prompt;
 
+        // 跨 token 持有同一 decoder,避免半截 UTF-8 字节被丢弃(汉字丢字 bug)
+        let mut decoder = UTF_8.new_decoder();
+
         loop {
             if token == eos || n_cur >= n_prompt + max_new_tokens {
                 break;
             }
-            let piece = self
+            // 同 streaming 路径:绕开 token_to_piece 的容量 bug
+            let piece_bytes = self
                 .model
-                .token_to_str(token, Special::Plaintext)
-                .map_err(|e| anyhow!("token_to_str error: {e}"))?;
+                .token_to_bytes(token, llama_cpp_2::model::Special::Plaintext)
+                .map_err(|e| anyhow!("token_to_bytes error: {e}"))?;
+            let mut piece = String::with_capacity(piece_bytes.len() + 16);
+            let _ = decoder.decode_to_string(&piece_bytes, &mut piece, /* last= */ false);
             if piece == "<|im_end|>" || piece == "<|endoftext|>" {
                 break;
             }
@@ -203,6 +237,9 @@ impl Llm {
             n_cur += 1;
             token = sampler.sample(&ctx, 0);
         }
+
+        // 冲刷 decoder 里残留的字节
+        let _ = decoder.decode_to_string(&[], &mut output, /* last= */ true);
 
         Ok(output)
     }

@@ -21,6 +21,7 @@ import HelpDrawer from "./components/HelpDrawer";
 import LicenseStatusBar from "./components/LicenseStatusBar";
 import UpgradeDialog from "./components/UpgradeDialog";
 import UpdateNotifier from "./components/UpdateNotifier";
+import { RerankerBanner } from "./components/RerankerBanner";
 import { useLicenseStore } from "./stores/licenseStore";
 
 const { Header } = Layout;
@@ -409,6 +410,9 @@ export default function App() {
             </Tooltip>
           </div>
         </Header>
+
+        {/* ── 一次性提示横幅:reranker 未下载时弹出,可"稍后" ── */}
+        <RerankerBanner />
 
         {/* ── 主内容区 ── */}
         <div style={{ display: "flex", flex: 1, overflow: "hidden", background: "var(--color-bg)" }}>
