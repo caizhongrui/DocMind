@@ -23,6 +23,11 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # 必须深 clone + 拉 tags,否则 git tag -l --format
+                            # 找不到 annotated message,fallback 到 GitHub 自动
+                            # 生成的"Full Changelog: ..."链接,doc-api 收到的
+                            # 就是个无意义占位符
 
       - name: Download release assets
         env:
