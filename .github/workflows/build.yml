@@ -171,16 +171,20 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      # 必须先 checkout, 再 download-artifact ——
+      # actions/checkout@v4 默认 clean: true 会把 untracked 的 artifacts/
+      # 当垃圾删掉, 后续 publish 步骤 glob 啥也匹配不到 (这就是 v0.2.0
+      # 上传到 GitHub Release 成功但 doc-api 没收到新版本的根因)。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0           # need full tag history for git tag -l --format
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
 
       - name: List downloaded artifacts
         run: find artifacts -type f | sort
-
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0           # need full tag history for git tag -l --format
 
       - name: Capture release notes (prefer annotated tag message)
         id: relbody

@@ -1,0 +1,104 @@
+name: Republish to doc-api
+
+# 手动触发,用于把已发布的 GitHub Release 重新推到 doc-api。
+# 解决 build.yml 的 publish-to-docapi job 历史上 silently fail
+# (artifacts/ 被 checkout 误删)留下的版本缺漏。
+#
+# 触发方式:
+#   gh workflow run republish-to-docapi.yml -f version=v0.2.0
+# 或者在 GitHub Actions 页面手动跑
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tag (含 v 前缀,例如 v0.2.0)'
+        required: true
+        type: string
+
+jobs:
+  republish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p assets
+          gh release download "$VERSION" --dir assets --clobber
+          echo "── 下载到的 assets ──"
+          ls -la assets/
+
+      - name: Capture release notes (prefer annotated tag message)
+        id: relbody
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          tag_msg="$(git tag -l --format='%(contents:body)' "$VERSION")"
+          if [ -z "$(echo "$tag_msg" | tr -d '[:space:]')" ]; then
+            tag_msg="$(git tag -l --format='%(contents)' "$VERSION")"
+          fi
+          if [ -z "$(echo "$tag_msg" | tr -d '[:space:]')" ]; then
+            tag_msg="$(gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+          fi
+          echo "$tag_msg" | head -8
+          {
+            echo "body<<DOCMIND_NOTES_EOF"
+            echo "$tag_msg"
+            echo "DOCMIND_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish each platform's updater bundle
+        env:
+          PUBLISH_URL: ${{ vars.DOCAPI_PUBLISH_URL || 'https://doc-api.boyobang.com/api/v1/releases/publish' }}
+          PUBLISH_TOKEN: ${{ secrets.RELEASES_PUBLISH_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          RELEASE_BODY: ${{ steps.relbody.outputs.body }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          if [ -z "$PUBLISH_TOKEN" ]; then
+            echo "::error::RELEASES_PUBLISH_TOKEN secret not set"
+            exit 1
+          fi
+          version="${VERSION#v}"
+
+          publish() {
+            local platform="$1" updater="$2" sig="$3"
+            if [ ! -f "$updater" ]; then
+              echo "::warning::no updater bundle for $platform (path=\"$updater\")"
+              return
+            fi
+            if [ ! -f "$sig" ]; then
+              echo "::warning::no signature for $platform (path=\"$sig\")"
+              return
+            fi
+            echo "▸ uploading $platform: $(basename "$updater")"
+            curl -fsSL -X POST "$PUBLISH_URL" \
+              -H "Authorization: Bearer $PUBLISH_TOKEN" \
+              -F "version=$version" \
+              -F "platform=$platform" \
+              -F "notes=$RELEASE_BODY" \
+              -F "signature=$(cat "$sig")" \
+              -F "binary=@$updater" \
+              | tee /dev/stderr
+            echo
+          }
+
+          # macOS arm64 — .app.tar.gz 是 Tauri updater bundle
+          mac_apps=(assets/*.app.tar.gz)
+          mac_sigs=(assets/*.app.tar.gz.sig)
+          publish "darwin-aarch64" "${mac_apps[0]:-}" "${mac_sigs[0]:-}"
+
+          # Windows x64 — NSIS .exe 是 Tauri updater bundle
+          win_exes=(assets/*-setup.exe)
+          win_sigs=(assets/*-setup.exe.sig)
+          publish "windows-x86_64" "${win_exes[0]:-}" "${win_sigs[0]:-}"
+
+          echo "✓ doc-api republish complete"
