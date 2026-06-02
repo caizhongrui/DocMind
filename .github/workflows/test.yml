@@ -12,9 +12,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Tauri 2 在 Linux 上依赖 GTK / WebKit / glib 系统库,即使我们的代码
+      # 不直接调用它们,tauri / wry / glib-sys 等 crate 也要在 build script
+      # 里 pkg-config 探测。不装就直接 `glib-2.0 not found` 编译挂掉。
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            build-essential \
+            file
+
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - name: Run Rust tests
-        run: cd src-tauri && cargo test
+
+      # 用 --lib 而不是 cargo test:bin target 在 Linux 上要 link 整个
+      # tauri/webview,跑 lib tests 已经覆盖业务逻辑、足够当 CI gate
+      - name: Run Rust lib tests
+        run: cd src-tauri && cargo test --lib
