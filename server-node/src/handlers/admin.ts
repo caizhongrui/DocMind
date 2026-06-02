@@ -1002,6 +1002,134 @@ adminRouter.get("/portal", (c) => {
 // ── 推广码(v0.3.0)──────────────────────────────────────────────────────
 //   运营手动签发邀请码给推广大使,买家在客户端升级对话框输入码,后台
 //   自动归因。这里提供:列表 + 新建 + 编辑 + 单码订单查询 + CSV 导出。
+//
+//   v0.3.1:支持梯度返现。每个码可配多段 tier,每单按它在该码内
+//   "非退款 rank" 命中对应阶梯,撤回订单不占用 rank,所以退款不会
+//   把后面单子的阶梯压回去。
+
+interface Tier {
+  /** 第几单起按这一档算(包含) */
+  from: number;
+  /** 这一档每单分成(分) */
+  fen: number;
+}
+
+/**
+ * 把"每行 `from:fen`"的纯文本(运营友好)转成 Tier[] 持久化。
+ * 空字符串 / 解析失败 → null,表示不启用梯度,走 commission_cents 平价。
+ *
+ * 例:
+ *   "1:300\n11:500\n51:800"
+ *   → [{from:1,fen:300}, {from:11,fen:500}, {from:51,fen:800}]
+ */
+function parseTiersText(input: string): Tier[] | null {
+  const lines = input
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return null;
+  const tiers: Tier[] = [];
+  for (const line of lines) {
+    const m = /^\s*(\d+)\s*[::]\s*(\d+)\s*$/.exec(line);
+    if (!m || m[1] === undefined || m[2] === undefined) return null;
+    const from = parseInt(m[1], 10);
+    const fen = parseInt(m[2], 10);
+    if (!isFinite(from) || from < 1 || !isFinite(fen) || fen < 0) return null;
+    tiers.push({ from, fen });
+  }
+  // 排序保证后面计算靠简单的"从下往上找最大命中"逻辑
+  tiers.sort((a, b) => a.from - b.from);
+  // 强制第 1 档必须是 from=1(否则第 1 单算不出价)
+  if (tiers.length === 0 || tiers[0]!.from !== 1) {
+    return null;
+  }
+  return tiers;
+}
+
+/** 反向:存的 JSON → 输入框里的多行文本,便于编辑 */
+function tiersToText(tiersJson: string | null): string {
+  if (!tiersJson) return "";
+  try {
+    const t = JSON.parse(tiersJson) as Tier[];
+    if (!Array.isArray(t)) return "";
+    return t.map((x) => `${x.from}:${x.fen}`).join("\n");
+  } catch {
+    return "";
+  }
+}
+
+/** 把存好的 JSON 解出 Tier[],失败返回 null */
+function loadTiers(tiersJson: string | null): Tier[] | null {
+  if (!tiersJson) return null;
+  try {
+    const t = JSON.parse(tiersJson) as Tier[];
+    if (!Array.isArray(t) || t.length === 0) return null;
+    return t.sort((a, b) => a.from - b.from);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 给定该码的梯度配置 + 本单在该码内的 rank(从 1 起算,不含退款单),
+ * 返回这一单实际应结的分成金额(分)。
+ *
+ * 没梯度 → 走 fallbackFen(扁平 commission_cents)。
+ */
+function commissionForRank(
+  tiers: Tier[] | null,
+  rank: number,
+  fallbackFen: number,
+): number {
+  if (!tiers || tiers.length === 0) return fallbackFen;
+  let rate = fallbackFen;
+  for (const t of tiers) {
+    if (rank >= t.from) rate = t.fen;
+  }
+  return rate;
+}
+
+/**
+ * 单码维度:汇总该码下所有 (refund_at IS NULL) 订单按 rank 算出的真实
+ * 分成。返回 {totalCount, totalFen, pendingCount, pendingFen}。
+ */
+function summarizeCode(
+  db: any,
+  code: string,
+  tiers: Tier[] | null,
+  fallbackFen: number,
+): { totalCount: number; totalFen: number; pendingCount: number; pendingFen: number } {
+  const rows = db
+    .prepare(
+      `SELECT id, settled_at, refund_at, paid_at
+         FROM invite_redemptions
+        WHERE code = ?
+        ORDER BY paid_at ASC, id ASC`,
+    )
+    .all(code) as Array<{
+    id: number;
+    settled_at: string | null;
+    refund_at: string | null;
+    paid_at: string;
+  }>;
+  let rank = 0;
+  let totalCount = 0;
+  let totalFen = 0;
+  let pendingCount = 0;
+  let pendingFen = 0;
+  for (const r of rows) {
+    if (r.refund_at) continue; // 退款单不占 rank、不计金额
+    rank++;
+    const fen = commissionForRank(tiers, rank, fallbackFen);
+    totalCount++;
+    totalFen += fen;
+    if (!r.settled_at) {
+      pendingCount++;
+      pendingFen += fen;
+    }
+  }
+  return { totalCount, totalFen, pendingCount, pendingFen };
+}
 
 adminRouter.get("/invites", (c) => {
   const guard = requireSession(c);
@@ -1010,16 +1138,7 @@ adminRouter.get("/invites", (c) => {
   const rows = db
     .prepare(
       `SELECT ic.code, ic.ambassador, ic.contact, ic.status, ic.commission_cents,
-              ic.note, ic.created_at, ic.expires_at,
-              COALESCE((
-                SELECT COUNT(*) FROM invite_redemptions ir
-                 WHERE ir.code = ic.code AND ir.refund_at IS NULL
-              ), 0) AS valid_count,
-              COALESCE((
-                SELECT COUNT(*) FROM invite_redemptions ir
-                 WHERE ir.code = ic.code AND ir.refund_at IS NULL
-                   AND ir.settled_at IS NULL
-              ), 0) AS pending_count
+              ic.tiers_json, ic.note, ic.created_at, ic.expires_at
          FROM invite_codes ic
         ORDER BY ic.created_at DESC`,
     )
@@ -1029,31 +1148,44 @@ adminRouter.get("/invites", (c) => {
     contact: string | null;
     status: string;
     commission_cents: number;
+    tiers_json: string | null;
     note: string | null;
     created_at: string;
     expires_at: string | null;
-    valid_count: number;
-    pending_count: number;
   }>;
 
   const tbody = rows
     .map((r) => {
+      const tiers = loadTiers(r.tiers_json);
+      const summary = summarizeCode(db, r.code, tiers, r.commission_cents);
       const statusChip =
         r.status === "active"
           ? `<span class="chip" style="color:#16a34a;border-color:#86efac;background:rgba(34,197,94,0.08);">启用</span>`
           : `<span class="chip chip-muted">已停用</span>`;
       const pendingCash =
-        r.pending_count > 0 && r.commission_cents > 0
-          ? `<span style="color:#dc2626;font-weight:600;">¥${((r.pending_count * r.commission_cents) / 100).toFixed(2)}</span>`
+        summary.pendingFen > 0
+          ? `<span style="color:#dc2626;font-weight:600;">¥${(summary.pendingFen / 100).toFixed(2)}</span>`
           : "—";
+      // 单笔分成列:无梯度显示平价;有梯度显示"梯度"标记 + 范围
+      let rateCell: string;
+      if (tiers && tiers.length > 0) {
+        const min = Math.min(...tiers.map((t) => t.fen));
+        const max = Math.max(...tiers.map((t) => t.fen));
+        rateCell =
+          min === max
+            ? `¥${(min / 100).toFixed(2)} · 梯度`
+            : `¥${(min / 100).toFixed(2)} - ¥${(max / 100).toFixed(2)} · ${tiers.length} 档`;
+      } else {
+        rateCell = `¥${(r.commission_cents / 100).toFixed(2)}`;
+      }
       return `<tr>
   <td class="mono">${htmlEscape(r.code)}</td>
   <td>${htmlEscape(r.ambassador)}</td>
   <td class="mono" style="font-size:11px;">${htmlEscape(r.contact ?? "—")}</td>
   <td>${statusChip}</td>
-  <td style="text-align:center;">${r.valid_count}</td>
+  <td style="text-align:center;">${summary.totalCount}</td>
   <td>${pendingCash}</td>
-  <td>¥${(r.commission_cents / 100).toFixed(2)}</td>
+  <td style="font-size:11px;">${rateCell}</td>
   <td style="font-size:11px;color:var(--text-muted);">${htmlEscape(formatDate(r.created_at) ?? "—")}</td>
   <td>
     <a class="btn" href="/admin/invites/${encodeURIComponent(r.code)}/orders" style="padding:4px 8px;font-size:11px;">订单</a>
@@ -1097,6 +1229,7 @@ adminRouter.post("/invites/new", async (c) => {
   const ambassador = String(form.get("ambassador") ?? "").trim();
   const contact = String(form.get("contact") ?? "").trim() || null;
   const commission = parseInt(String(form.get("commission") ?? "0"), 10);
+  const tiersInput = String(form.get("tiers") ?? "").trim();
   const note = String(form.get("note") ?? "").trim() || null;
   const expires_at = String(form.get("expires_at") ?? "").trim() || null;
 
@@ -1107,16 +1240,30 @@ adminRouter.post("/invites/new", async (c) => {
     return c.text("大使名称不能为空", 400);
   }
 
+  // 解析梯度文本 → JSON;输入为空 → null(走平价)
+  let tiersJson: string | null = null;
+  if (tiersInput) {
+    const tiers = parseTiersText(tiersInput);
+    if (!tiers) {
+      return c.text(
+        "梯度格式错误。每行 `第几单起:分成(分)`,第一行必须是 `1:XXX`。例如:\n1:300\n11:500\n51:800",
+        400,
+      );
+    }
+    tiersJson = JSON.stringify(tiers);
+  }
+
   try {
     db.prepare(
       `INSERT INTO invite_codes
-         (code, ambassador, contact, status, commission_cents, note, expires_at)
-       VALUES (?, ?, ?, 'active', ?, ?, ?)`,
+         (code, ambassador, contact, status, commission_cents, tiers_json, note, expires_at)
+       VALUES (?, ?, ?, 'active', ?, ?, ?, ?)`,
     ).run(
       code,
       ambassador,
       contact,
       isFinite(commission) ? commission : 0,
+      tiersJson,
       note,
       expires_at,
     );
@@ -1151,19 +1298,33 @@ adminRouter.post("/invites/:code/edit", async (c) => {
   const contact = String(form.get("contact") ?? "").trim() || null;
   const status = String(form.get("status") ?? "active");
   const commission = parseInt(String(form.get("commission") ?? "0"), 10);
+  const tiersInput = String(form.get("tiers") ?? "").trim();
   const note = String(form.get("note") ?? "").trim() || null;
   const expires_at = String(form.get("expires_at") ?? "").trim() || null;
+
+  let tiersJson: string | null = null;
+  if (tiersInput) {
+    const tiers = parseTiersText(tiersInput);
+    if (!tiers) {
+      return c.text(
+        "梯度格式错误。每行 `第几单起:分成(分)`,第一行必须是 `1:XXX`。",
+        400,
+      );
+    }
+    tiersJson = JSON.stringify(tiers);
+  }
 
   db.prepare(
     `UPDATE invite_codes
         SET ambassador = ?, contact = ?, status = ?,
-            commission_cents = ?, note = ?, expires_at = ?
+            commission_cents = ?, tiers_json = ?, note = ?, expires_at = ?
       WHERE code = ?`,
   ).run(
     ambassador,
     contact,
     status === "active" ? "active" : "disabled",
     isFinite(commission) ? commission : 0,
+    tiersJson,
     note,
     expires_at,
     code,
@@ -1178,20 +1339,23 @@ adminRouter.get("/invites/:code/orders", (c) => {
   const code = c.req.param("code");
   const info = db
     .prepare(
-      `SELECT code, ambassador, commission_cents FROM invite_codes WHERE code = ?`,
+      `SELECT code, ambassador, commission_cents, tiers_json
+         FROM invite_codes WHERE code = ?`,
     )
     .get(code) as
-    | { code: string; ambassador: string; commission_cents: number }
+    | { code: string; ambassador: string; commission_cents: number; tiers_json: string | null }
     | undefined;
   if (!info) return c.text("not found", 404);
 
-  const rows = db
+  const tiers = loadTiers(info.tiers_json);
+  // 关键:rank 计算必须基于 paid_at ASC 顺序,展示时再倒序更友好
+  const rowsAsc = db
     .prepare(
       `SELECT id, buyer_order_id, buyer_fp, paid_at, paid_amount_cents,
               refund_at, settled_at, settle_note
          FROM invite_redemptions
         WHERE code = ?
-        ORDER BY paid_at DESC`,
+        ORDER BY paid_at ASC, id ASC`,
     )
     .all(code) as Array<{
     id: number;
@@ -1204,7 +1368,27 @@ adminRouter.get("/invites/:code/orders", (c) => {
     settle_note: string | null;
   }>;
 
-  const tbody = rows
+  // 给每条记录算 rank + commission;退款单 rank=null + commission=0
+  type Enriched = (typeof rowsAsc)[number] & {
+    rank: number | null;
+    commission_fen: number;
+  };
+  let rankCounter = 0;
+  const enriched: Enriched[] = rowsAsc.map((r) => {
+    if (r.refund_at) {
+      return { ...r, rank: null, commission_fen: 0 };
+    }
+    rankCounter++;
+    return {
+      ...r,
+      rank: rankCounter,
+      commission_fen: commissionForRank(tiers, rankCounter, info.commission_cents),
+    };
+  });
+  // 展示按 paid_at 倒序
+  enriched.reverse();
+
+  const tbody = enriched
     .map((r) => {
       let statusChip = "";
       if (r.refund_at) {
@@ -1223,9 +1407,15 @@ adminRouter.get("/invites/:code/orders", (c) => {
           : r.settled_at
             ? `<span style="font-size:11px;color:var(--text-muted);">${htmlEscape(r.settle_note ?? "")}</span>`
             : "";
+      const rankCell = r.rank == null ? "—" : `#${r.rank}`;
+      const commissionCell = r.refund_at
+        ? "—"
+        : `¥${(r.commission_fen / 100).toFixed(2)}`;
       return `<tr>
+  <td style="text-align:center;font-size:11px;color:var(--text-muted);">${rankCell}</td>
   <td class="mono">${htmlEscape(r.buyer_order_id)}</td>
   <td>¥${(r.paid_amount_cents / 100).toFixed(2)}</td>
+  <td style="font-weight:500;">${commissionCell}</td>
   <td>${htmlEscape(formatDate(r.paid_at) ?? "—")}</td>
   <td>${statusChip}</td>
   <td>${htmlEscape(formatDate(r.settled_at) ?? "—")}</td>
@@ -1234,25 +1424,37 @@ adminRouter.get("/invites/:code/orders", (c) => {
     })
     .join("");
 
-  const validCount = rows.filter((r) => !r.refund_at).length;
-  const pendingCount = rows.filter((r) => !r.refund_at && !r.settled_at).length;
-  const pendingAmount = pendingCount * info.commission_cents;
+  const summary = summarizeCode(db, code, tiers, info.commission_cents);
+
+  // 梯度档位概览(给运营对账时一眼看清规则)
+  const tierBlock = tiers
+    ? `<div class="card" style="margin-bottom:14px;">
+        <div style="font-weight:600;font-size:12px;margin-bottom:6px;">梯度规则</div>
+        <table style="width:auto;">
+          <thead><tr><th>第几单起</th><th>每单分成</th></tr></thead>
+          <tbody>
+            ${tiers.map((t) => `<tr><td style="padding:4px 16px 4px 0;">#${t.from}</td><td>¥${(t.fen / 100).toFixed(2)}</td></tr>`).join("")}
+          </tbody>
+        </table>
+       </div>`
+    : "";
 
   const body = `
 <h1>${htmlEscape(info.code)} · ${htmlEscape(info.ambassador)}</h1>
 <div class="stat-grid">
-  <div class="stat"><div class="stat-label">有效订单数</div><div class="stat-value">${validCount}</div></div>
-  <div class="stat"><div class="stat-label">待结算订单</div><div class="stat-value">${pendingCount}</div></div>
-  <div class="stat"><div class="stat-label">待结算金额</div><div class="stat-value">¥${(pendingAmount / 100).toFixed(2)}</div></div>
-  <div class="stat"><div class="stat-label">单笔分成</div><div class="stat-value">¥${(info.commission_cents / 100).toFixed(2)}</div></div>
+  <div class="stat"><div class="stat-label">有效订单数</div><div class="stat-value">${summary.totalCount}</div></div>
+  <div class="stat"><div class="stat-label">待结算订单</div><div class="stat-value">${summary.pendingCount}</div></div>
+  <div class="stat"><div class="stat-label">待结算金额</div><div class="stat-value">¥${(summary.pendingFen / 100).toFixed(2)}</div></div>
+  <div class="stat"><div class="stat-label">累计应付</div><div class="stat-value">¥${(summary.totalFen / 100).toFixed(2)}</div></div>
 </div>
+${tierBlock}
 <div style="margin-bottom:12px;">
   <a class="btn" href="/admin/invites">← 返回列表</a>
   <a class="btn" href="/admin/invites/${encodeURIComponent(code)}/export.csv">导出本码 CSV</a>
 </div>
 <table>
-  <thead><tr><th>订单号</th><th>实付</th><th>支付时间</th><th>状态</th><th>结算时间</th><th>操作</th></tr></thead>
-  <tbody>${tbody || `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted);">还没有归因订单。</td></tr>`}</tbody>
+  <thead><tr><th>排名</th><th>订单号</th><th>实付</th><th>分成</th><th>支付时间</th><th>状态</th><th>结算时间</th><th>操作</th></tr></thead>
+  <tbody>${tbody || `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted);">还没有归因订单。</td></tr>`}</tbody>
 </table>`;
   return c.html(layout(`${info.code} 订单`, body));
 });
@@ -1277,20 +1479,27 @@ adminRouter.post("/invites/redemption/:id/settle", async (c) => {
 });
 
 // CSV 导出 —— 全部归因订单(便于运营做月度结算 Excel)
+// 关键:每行带上**本单实际分成**(按 rank + tier 算出来),运营不需要
+// 自己再 vlookup。
 adminRouter.get("/invites/export.csv", (c) => {
   const guard = requireSession(c);
   if (guard !== true) return guard;
   const { db } = c.var.app;
-  const rows = db
+  // 单 SQL 拿不出"每码内 rank",所以两步:先拿全量,再按 code 分组算 rank
+  const codes = db
     .prepare(
-      `SELECT ir.code, ic.ambassador, ic.contact, ic.commission_cents,
-              ir.buyer_order_id, ir.paid_amount_cents, ir.paid_at,
-              ir.refund_at, ir.settled_at, ir.settle_note
-         FROM invite_redemptions ir
-         JOIN invite_codes ic ON ic.code = ir.code
-        ORDER BY ir.paid_at DESC`,
+      `SELECT code, ambassador, contact, commission_cents, tiers_json
+         FROM invite_codes`,
     )
-    .all() as any[];
+    .all() as Array<{
+    code: string;
+    ambassador: string;
+    contact: string | null;
+    commission_cents: number;
+    tiers_json: string | null;
+  }>;
+  const codeMap = new Map(codes.map((c) => [c.code, c]));
+  const rows = enrichedRedemptionRows(db, undefined, codeMap);
   return c.body(toCsv(rows), 200, {
     "Content-Type": "text/csv; charset=utf-8",
     "Content-Disposition": `attachment; filename="invite-redemptions-${new Date().toISOString().slice(0, 10)}.csv"`,
@@ -1303,22 +1512,94 @@ adminRouter.get("/invites/:code/export.csv", (c) => {
   if (guard !== true) return guard;
   const { db } = c.var.app;
   const code = c.req.param("code");
-  const rows = db
+  const info = db
     .prepare(
-      `SELECT ir.code, ic.ambassador, ic.contact, ic.commission_cents,
-              ir.buyer_order_id, ir.paid_amount_cents, ir.paid_at,
-              ir.refund_at, ir.settled_at, ir.settle_note
-         FROM invite_redemptions ir
-         JOIN invite_codes ic ON ic.code = ir.code
-        WHERE ir.code = ?
-        ORDER BY ir.paid_at DESC`,
+      `SELECT code, ambassador, contact, commission_cents, tiers_json
+         FROM invite_codes WHERE code = ?`,
     )
-    .all(code) as any[];
+    .get(code) as
+    | {
+        code: string;
+        ambassador: string;
+        contact: string | null;
+        commission_cents: number;
+        tiers_json: string | null;
+      }
+    | undefined;
+  if (!info) return c.text("not found", 404);
+  const rows = enrichedRedemptionRows(db, code, new Map([[code, info]]));
   return c.body(toCsv(rows), 200, {
     "Content-Type": "text/csv; charset=utf-8",
     "Content-Disposition": `attachment; filename="invite-${code}-${new Date().toISOString().slice(0, 10)}.csv"`,
   });
 });
+
+/**
+ * 取归因订单 + 给每行算 rank、tier 实际分成。返回的字段直接给 toCsv 用。
+ * 限定单个 code 时传 onlyCode,否则全表。codeMap 是 code → 码元信息。
+ */
+function enrichedRedemptionRows(
+  db: any,
+  onlyCode: string | undefined,
+  codeMap: Map<
+    string,
+    { code: string; ambassador: string; contact: string | null;
+      commission_cents: number; tiers_json: string | null }
+  >,
+): any[] {
+  const sql = onlyCode
+    ? `SELECT code, buyer_order_id, paid_amount_cents, paid_at,
+              refund_at, settled_at, settle_note
+         FROM invite_redemptions
+        WHERE code = ?
+        ORDER BY code ASC, paid_at ASC, id ASC`
+    : `SELECT code, buyer_order_id, paid_amount_cents, paid_at,
+              refund_at, settled_at, settle_note
+         FROM invite_redemptions
+        ORDER BY code ASC, paid_at ASC, id ASC`;
+  const raw = (onlyCode ? db.prepare(sql).all(onlyCode) : db.prepare(sql).all()) as Array<{
+    code: string;
+    buyer_order_id: string;
+    paid_amount_cents: number;
+    paid_at: string;
+    refund_at: string | null;
+    settled_at: string | null;
+    settle_note: string | null;
+  }>;
+
+  // 按 code 分组算 rank
+  const rankByCode = new Map<string, number>();
+  const enriched: any[] = [];
+  for (const r of raw) {
+    const meta = codeMap.get(r.code);
+    if (!meta) continue;
+    const tiers = loadTiers(meta.tiers_json);
+    let rank: number | null = null;
+    let commission_fen = 0;
+    if (!r.refund_at) {
+      const cur = (rankByCode.get(r.code) ?? 0) + 1;
+      rankByCode.set(r.code, cur);
+      rank = cur;
+      commission_fen = commissionForRank(tiers, cur, meta.commission_cents);
+    }
+    enriched.push({
+      code: r.code,
+      ambassador: meta.ambassador,
+      contact: meta.contact,
+      rank,
+      commission_fen,
+      buyer_order_id: r.buyer_order_id,
+      paid_amount_cents: r.paid_amount_cents,
+      paid_at: r.paid_at,
+      refund_at: r.refund_at,
+      settled_at: r.settled_at,
+      settle_note: r.settle_note,
+    });
+  }
+  // 展示按支付时间倒序
+  enriched.reverse();
+  return enriched;
+}
 
 function renderInviteForm(
   existing:
@@ -1328,6 +1609,7 @@ function renderInviteForm(
         contact: string | null;
         status: string;
         commission_cents: number;
+        tiers_json?: string | null;
         note: string | null;
         expires_at: string | null;
       }
@@ -1364,9 +1646,20 @@ function renderInviteForm(
   <label>联系方式(微信号 / 邮箱,运营结算用)</label>
   <input name="contact" placeholder="可选" value="${htmlEscape(existing?.contact ?? "")}" autocomplete="off">
 
-  <label>每单分成(单位:分,仅记账参考,不实付)</label>
+  <label>每单分成(扁平价 · 单位:分)</label>
   <input name="commission" type="number" min="0" step="1" value="${existing?.commission_cents ?? 0}">
-  <div class="hint">填 500 = ¥5,1000 = ¥10。这个字段只是给运营算账的依据,后端不会自动到账。</div>
+  <div class="hint">填 500 = ¥5,1000 = ¥10。**梯度规则**配置后会覆盖这一项。</div>
+
+  <label>梯度规则(可选 · 优先生效)</label>
+  <textarea name="tiers" rows="4" placeholder="每行 \`第几单起:分成(分)\`,第一行必须 1:XXX,例如:
+1:300
+11:500
+51:800">${htmlEscape(tiersToText(existing?.tiers_json ?? null))}</textarea>
+  <div class="hint">
+    设置后按订单在该码内的**非退款 rank** 算价。<br>
+    上例含义:第 1-10 单 ¥3/单,第 11-50 单 ¥5/单,第 51 单及以上 ¥8/单。<br>
+    留空 → 用上方扁平价。
+  </div>
 
   <label>过期时间(可选,ISO 格式 YYYY-MM-DD)</label>
   <input name="expires_at" placeholder="2027-01-01,留空表示永久" value="${htmlEscape(existing?.expires_at ?? "")}">
@@ -1396,7 +1689,8 @@ function toCsv(rows: any[]): string {
     "邀请码",
     "大使",
     "联系方式",
-    "单笔分成(元)",
+    "rank(单内排名)",
+    "本单分成(元)",
     "订单号",
     "实付金额(元)",
     "支付时间",
@@ -1417,7 +1711,8 @@ function toCsv(rows: any[]): string {
         r.code,
         r.ambassador,
         r.contact ?? "",
-        ((r.commission_cents ?? 0) / 100).toFixed(2),
+        r.rank ?? "",
+        ((r.commission_fen ?? 0) / 100).toFixed(2),
         r.buyer_order_id,
         ((r.paid_amount_cents ?? 0) / 100).toFixed(2),
         r.paid_at ?? "",

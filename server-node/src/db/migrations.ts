@@ -163,6 +163,12 @@ export function applyMigrations(db: Database) {
   // v0.3.0:在 orders 上挂推广码,webhook 标记付款成功时再写入
   // invite_redemptions 形成归因记录
   alterSafe(db, "ALTER TABLE orders ADD COLUMN invite_code TEXT");
+
+  // v0.3.1:推广码梯度返现 —— 每个码可配多段阶梯,按订单在该码内的
+  // 非退款 rank 计算实际分成。tiers_json 形如:
+  //   [{"from":1,"fen":300},{"from":11,"fen":500},{"from":51,"fen":800}]
+  // NULL = 不启用梯度,所有订单按 commission_cents 平价。
+  alterSafe(db, "ALTER TABLE invite_codes ADD COLUMN tiers_json TEXT");
 }
 
 function alterSafe(db: Database, sql: string) {
