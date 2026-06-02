@@ -11,6 +11,8 @@ import {
 } from "antd";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ChartModal, extractTableData, type TableData } from "./ChartModal";
+import { BarChartOutlined } from "@ant-design/icons";
 import {
   SendOutlined,
   StopOutlined,
@@ -83,6 +85,10 @@ export default function QAPanel() {
       askingWatchdogRef.current = null;
     }
   };
+
+  // 图表 modal:用户点 markdown 表格旁的"📊 转为图表"按钮,
+  // 从 DOM 抽取表格结构丢进来渲染
+  const [chartTable, setChartTable] = useState<TableData | null>(null);
   const [expandedSources, setExpandedSources] = useState<Set<number>>(new Set());
   const [continuous, setContinuous] = useState(true);
 
@@ -882,7 +888,52 @@ export default function QAPanel() {
                     {msg.error ? (
                       msg.content
                     ) : msg.content ? (
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          // 给每个 markdown 表格挂一个"📊 转为图表"按钮
+                          // 容器:相对定位,右上角浮一个小按钮
+                          table: ({ node: _n, ...tableProps }) => {
+                            const tableRef = useRef<HTMLTableElement>(null);
+                            const openChart = () => {
+                              if (tableRef.current) {
+                                setChartTable(extractTableData(tableRef.current));
+                              }
+                            };
+                            return (
+                              <div style={{ position: "relative", margin: "8px 0" }}>
+                                <button
+                                  type="button"
+                                  onClick={openChart}
+                                  title="转为图表"
+                                  style={{
+                                    position: "absolute",
+                                    top: -2,
+                                    right: 0,
+                                    background: "var(--color-primary-bg, rgba(99,102,241,0.08))",
+                                    color: "var(--color-primary, #6366f1)",
+                                    border: "1px solid var(--color-primary, #6366f1)",
+                                    borderRadius: 4,
+                                    padding: "2px 8px",
+                                    fontSize: 11,
+                                    cursor: "pointer",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                    zIndex: 1,
+                                  }}
+                                >
+                                  <BarChartOutlined style={{ fontSize: 12 }} />
+                                  转为图表
+                                </button>
+                                <table ref={tableRef} {...tableProps} />
+                              </div>
+                            );
+                          },
+                        }}
+                      >
+                        {msg.content}
+                      </ReactMarkdown>
                     ) : (
                       <span style={{ color: "var(--color-text-muted)", fontStyle: "italic", fontSize: 12 }}>
                         {/* 只让最后一条 assistant 占位用 ragStage,历史消息保持静态 */}
@@ -1111,6 +1162,12 @@ export default function QAPanel() {
           </div>
         </div>
       </div>
+
+      <ChartModal
+        open={chartTable !== null}
+        data={chartTable}
+        onClose={() => setChartTable(null)}
+      />
     </div>
   );
 }

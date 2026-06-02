@@ -90,6 +90,7 @@ export function layout(title: string, body: string): string {
     <a href="/admin/licenses">License</a>
     <a href="/admin/orders">订单</a>
     <a href="/admin/refunds">退款</a>
+    <a href="/admin/invites">推广码</a>
     <a href="/admin/downloads">下载日志</a>
     <a href="/admin/portal">门户访问</a>
     <a href="/admin/releases">版本</a>

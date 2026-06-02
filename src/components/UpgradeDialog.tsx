@@ -67,6 +67,50 @@ export default function UpgradeDialog() {
   const [startingTrial, setStartingTrial] = useState(false);
   const [trialError, setTrialError] = useState<string | null>(null);
 
+  // 推广码(v0.3.0):用户在升级对话框可选输入码;校验后透传到 /payment/prepare,
+  // 后端在微信支付回调成功时写入归因记录。不影响价格,也不展示金额。
+  const [inviteCode, setInviteCode] = useState("");
+  const [inviteStatus, setInviteStatus] = useState<
+    | { kind: "idle" }
+    | { kind: "checking" }
+    | { kind: "valid"; code: string; ambassador: string }
+    | { kind: "invalid"; reason: string }
+  >({ kind: "idle" });
+
+  const validateInviteCode = async () => {
+    const code = inviteCode.trim().toUpperCase();
+    if (!code) {
+      setInviteStatus({ kind: "idle" });
+      return;
+    }
+    setInviteStatus({ kind: "checking" });
+    try {
+      const r = await fetch(`${API_BASE}/api/v1/invite/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const d = (await r.json()) as
+        | { ok: true; code: string; ambassador: string }
+        | { ok: false; reason: string };
+      if (d.ok) {
+        setInviteStatus({ kind: "valid", code: d.code, ambassador: d.ambassador });
+      } else {
+        const human =
+          d.reason === "not_found"
+            ? "该推广码不存在"
+            : d.reason === "disabled"
+              ? "该推广码已停用"
+              : d.reason === "expired"
+                ? "该推广码已过期"
+                : "推广码无效";
+        setInviteStatus({ kind: "invalid", reason: human });
+      }
+    } catch {
+      setInviteStatus({ kind: "invalid", reason: "网络错误,请稍后再试" });
+    }
+  };
+
   const visible = upgradeRequest !== null;
 
   useEffect(() => {
@@ -171,10 +215,17 @@ export default function UpgradeDialog() {
     setPaymentPhase("preparing");
     try {
       const fp = await invoke<string>("get_hardware_fingerprint");
+      // 只在码已校验通过时透传;校验失败 / 未输入 → 不带,避免脏数据进 orders
+      const validInviteCode =
+        inviteStatus.kind === "valid" ? inviteStatus.code : undefined;
       const r = await fetch(`${API_BASE}/api/v1/payment/prepare`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: "lifetime", fp }),
+        body: JSON.stringify({
+          plan: "lifetime",
+          fp,
+          ...(validInviteCode ? { invite_code: validInviteCode } : {}),
+        }),
       });
       if (!r.ok) {
         const text = await r.text();
@@ -536,6 +587,86 @@ export default function UpgradeDialog() {
                 >
                   开始试用
                 </Button>
+              </div>
+            )}
+            {/* 推广码输入(可选)—— 仅在用户没进入支付二维码阶段时显示 */}
+            {paymentPhase === "idle" && (
+              <div
+                style={{
+                  marginBottom: 10,
+                  padding: "10px 12px",
+                  borderRadius: 6,
+                  background: "var(--color-surface-elevated)",
+                  border: "1px solid var(--color-border)",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--color-text-muted)",
+                    marginBottom: 6,
+                  }}
+                >
+                  有推广码?(可选 · 不影响价格)
+                </div>
+                <Space.Compact style={{ width: "100%" }}>
+                  <input
+                    value={inviteCode}
+                    onChange={(e) => {
+                      setInviteCode(e.target.value);
+                      if (inviteStatus.kind !== "idle") setInviteStatus({ kind: "idle" });
+                    }}
+                    placeholder="例如 DOCMIND-AB12"
+                    autoComplete="off"
+                    style={{
+                      flex: 1,
+                      padding: "5px 10px",
+                      fontSize: 12,
+                      borderRadius: 4,
+                      border: "1px solid var(--color-border)",
+                      outline: "none",
+                      background: "var(--color-bg)",
+                      color: "var(--color-text)",
+                      textTransform: "uppercase",
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        validateInviteCode();
+                      }
+                    }}
+                  />
+                  <Button
+                    size="small"
+                    loading={inviteStatus.kind === "checking"}
+                    onClick={validateInviteCode}
+                    disabled={!inviteCode.trim()}
+                  >
+                    校验
+                  </Button>
+                </Space.Compact>
+                {inviteStatus.kind === "valid" && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      fontSize: 11,
+                      color: "#16a34a",
+                    }}
+                  >
+                    ✓ 已识别推广码 {inviteStatus.code} · {inviteStatus.ambassador}
+                  </div>
+                )}
+                {inviteStatus.kind === "invalid" && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      fontSize: 11,
+                      color: "#dc2626",
+                    }}
+                  >
+                    ✗ {inviteStatus.reason}
+                  </div>
+                )}
               </div>
             )}
             <Space style={{ width: "100%", justifyContent: "space-between" }}>

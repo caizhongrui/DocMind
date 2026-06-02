@@ -24,6 +24,7 @@ import { paymentRouter, paymentSuccessHandler } from "./handlers/payment.js";
 import { apiReleasesRouter, releasesRouter } from "./handlers/releases.js";
 import { adminRouter } from "./handlers/admin.js";
 import { publicRouter } from "./handlers/public.js";
+import { inviteRouter } from "./handlers/invite.js";
 import { existsSync } from "node:fs";
 
 const PORTAL_ROOT = process.env.PORTAL_ROOT ?? "/app/portal";
@@ -135,6 +136,7 @@ async function main() {
   // short-circuits doc-web requests before they reach here).
   app.route("/api/v1", licenseRouter);
   app.route("/api/v1/payment", paymentRouter);
+  app.route("/api/v1/invite", inviteRouter);
   app.route("/api/v1", apiReleasesRouter);
   app.route("/releases", releasesRouter);
   app.route("/admin", adminRouter);

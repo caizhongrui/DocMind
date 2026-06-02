@@ -120,12 +120,49 @@ export function applyMigrations(db: Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_portal_access_ts ON portal_access(ts);
     CREATE INDEX IF NOT EXISTS idx_portal_access_path ON portal_access(path);
+
+    -- ── 推广大使邀请码 (v0.3.0) ────────────────────────────────────────
+    --
+    -- 运营手动签发给 B 站 UP 主、公众号、微信群主等推广合作伙伴。
+    -- 大使私下用各种渠道宣传 → 买家在升级对话框输入码 → 后台记录归属
+    -- → 运营导 Excel 离线结算返利给大使。
+    --
+    -- 注意:不做"返利自动到账",一切奖励叙事在 App 外、私聊里。
+    -- 客户端只负责"输入码 + 校验"和"全价付款",归因纯后端事情。
+    CREATE TABLE IF NOT EXISTS invite_codes (
+      code             TEXT PRIMARY KEY,                 -- 'DOCMIND-AB12'
+      ambassador       TEXT NOT NULL,                    -- 大使昵称/平台名
+      contact          TEXT,                             -- 微信号 / 邮箱(运营结算用)
+      status           TEXT NOT NULL DEFAULT 'active',   -- 'active' | 'disabled'
+      commission_cents INTEGER NOT NULL DEFAULT 0,       -- 每单分成(分,仅记账参考)
+      note             TEXT,                             -- 内部备注:合作日期 / 平台 / 渠道
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at       TEXT                              -- 可选过期时间;NULL 表示永久
+    );
+
+    -- 推广订单归属:每个微信支付成功的订单 1 条
+    CREATE TABLE IF NOT EXISTS invite_redemptions (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      code            TEXT NOT NULL REFERENCES invite_codes(code),
+      buyer_order_id  TEXT NOT NULL UNIQUE,              -- = orders.out_trade_no
+      buyer_fp        TEXT,                              -- 仅记录,不参与去重
+      paid_at         TEXT NOT NULL,
+      paid_amount_cents INTEGER NOT NULL,                -- 实付金额(分),便于对账
+      refund_at       TEXT,                              -- 退款后填,统计时排除
+      settled_at      TEXT,                              -- 运营线下结算后填
+      settle_note     TEXT                               -- 结算备注:红包金额 / 日期 / 凭证
+    );
+    CREATE INDEX IF NOT EXISTS idx_invite_redemptions_code ON invite_redemptions(code);
+    CREATE INDEX IF NOT EXISTS idx_invite_redemptions_paid_at ON invite_redemptions(paid_at);
   `);
 
   // Forward migrations for existing installs (post-schema additions).
   alterSafe(db, "ALTER TABLE orders ADD COLUMN claim_ticket TEXT");
   alterSafe(db, "ALTER TABLE orders ADD COLUMN claim_consumed_at TEXT");
   alterSafe(db, "ALTER TABLE orders ADD COLUMN bound_fingerprint TEXT");
+  // v0.3.0:在 orders 上挂推广码,webhook 标记付款成功时再写入
+  // invite_redemptions 形成归因记录
+  alterSafe(db, "ALTER TABLE orders ADD COLUMN invite_code TEXT");
 }
 
 function alterSafe(db: Database, sql: string) {

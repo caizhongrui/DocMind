@@ -50,6 +50,8 @@ async function createOrder(opts: {
   db: any;
   fp: string | null;
   email: string;
+  /** 推广大使邀请码(可选)。已被 /api/v1/invite/validate 校验过的值。 */
+  inviteCode?: string | null;
 }): Promise<
   | { ok: true; outTradeNo: string; claimTicket: string; codeUrl: string; amountFen: number }
   | { ok: false; status: number; message: string }
@@ -62,12 +64,34 @@ async function createOrder(opts: {
   const claimTicket = randomTicket();
   const amount = opts.config.priceLifetimeFen;
 
+  // 防御性二次校验:就算客户端跳过 validate 直接传一个垃圾码,也得在
+  // 这里 reject 掉,免得脏数据进 orders 表。同时降级处理:码已下线/
+  // 过期就当作没填,正常出单(用户体验优先,不阻断支付)。
+  let inviteCode: string | null = null;
+  if (opts.inviteCode) {
+    const raw = opts.inviteCode.trim().toUpperCase();
+    if (/^[A-Z0-9-]{4,32}$/.test(raw)) {
+      const row = opts.db
+        .prepare(
+          `SELECT status, expires_at FROM invite_codes WHERE code = ?`,
+        )
+        .get(raw) as { status: string; expires_at: string | null } | undefined;
+      if (row && row.status === "active") {
+        const notExpired =
+          !row.expires_at || new Date(row.expires_at).getTime() >= Date.now();
+        if (notExpired) {
+          inviteCode = raw;
+        }
+      }
+    }
+  }
+
   opts.db
     .prepare(
-      `INSERT INTO orders (out_trade_no, amount, claim_ticket, bound_fingerprint, raw_payload)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO orders (out_trade_no, amount, claim_ticket, bound_fingerprint, raw_payload, invite_code)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .run(outTradeNo, amount, claimTicket, opts.fp, opts.email);
+    .run(outTradeNo, amount, claimTicket, opts.fp, opts.email, inviteCode);
 
   const wp = new WechatPay(w);
   let codeUrl: string;
@@ -91,9 +115,10 @@ paymentRouter.get("/checkout", async (c) => {
   const email = c.req.query("email") ?? "";
   const fpRaw = (c.req.query("fp") ?? "").trim().toLowerCase();
   const fp = /^[0-9a-f]{16,128}$/.test(fpRaw) ? fpRaw : null;
+  const inviteCode = c.req.query("invite_code") ?? null;
   if (plan !== "lifetime") return c.text("unknown plan", 400);
 
-  const r = await createOrder({ config, db, fp, email });
+  const r = await createOrder({ config, db, fp, email, inviteCode });
   if (!r.ok) {
     if (r.status === 503) {
       return c.html(
@@ -131,9 +156,10 @@ paymentRouter.post("/prepare", async (c) => {
   const email = String(body?.email ?? "");
   const fpRaw = String(body?.fp ?? "").trim().toLowerCase();
   const fp = /^[0-9a-f]{16,128}$/.test(fpRaw) ? fpRaw : null;
+  const inviteCode = body?.invite_code ? String(body.invite_code) : null;
   if (plan !== "lifetime") return c.json({ error: "unknown plan" }, 400);
 
-  const r = await createOrder({ config, db, fp, email });
+  const r = await createOrder({ config, db, fp, email, inviteCode });
   if (!r.ok) return c.json({ error: r.message }, r.status as any);
 
   const qrSvg = await QRCode.toString(r.codeUrl, {
@@ -262,10 +288,17 @@ paymentRouter.post("/wechat/webhook", async (c) => {
   const outTradeNo = event.out_trade_no;
   const order = db
     .prepare(
-      `SELECT id, license_key, bound_fingerprint FROM orders WHERE out_trade_no = ?`,
+      `SELECT id, license_key, bound_fingerprint, invite_code, amount
+         FROM orders WHERE out_trade_no = ?`,
     )
     .get(outTradeNo) as
-    | { id: number; license_key: string | null; bound_fingerprint: string | null }
+    | {
+        id: number;
+        license_key: string | null;
+        bound_fingerprint: string | null;
+        invite_code: string | null;
+        amount: number;
+      }
     | undefined;
   if (!order) {
     console.warn(`[wechat] webhook for unknown order ${outTradeNo}`);
@@ -302,6 +335,32 @@ paymentRouter.post("/wechat/webhook", async (c) => {
     plaintext,
     outTradeNo,
   );
+
+  // ── v0.3.0:推广码归因 ──
+  //   订单上带了 invite_code 就写一条 invite_redemptions 作为大使的
+  //   推广记录。INSERT OR IGNORE 避免 webhook 重试导致重复(out_trade_no
+  //   是 UNIQUE)。
+  if (order.invite_code) {
+    try {
+      db.prepare(
+        `INSERT OR IGNORE INTO invite_redemptions
+           (code, buyer_order_id, buyer_fp, paid_at, paid_amount_cents)
+         VALUES (?, ?, ?, COALESCE(?, datetime('now')), ?)`,
+      ).run(
+        order.invite_code,
+        outTradeNo,
+        order.bound_fingerprint,
+        event.success_time,
+        order.amount,
+      );
+      console.log(
+        `[invite] redemption recorded: code=${order.invite_code} order=${outTradeNo}`,
+      );
+    } catch (e) {
+      // 推广码记录失败不能阻断主流程(license 已经发出去了),只是告警
+      console.error(`[invite] failed to record redemption for ${outTradeNo}:`, e);
+    }
+  }
 
   console.log(`[wechat] license ${newKey} issued for order ${outTradeNo}`);
   return c.json({ code: "SUCCESS", message: "ok" });
@@ -359,17 +418,29 @@ paymentRouter.post("/wechat/refund_webhook", async (c) => {
       WHERE out_refund_no = ?`,
   ).run(status, event.refund_id, plaintext, event.out_refund_no);
 
-  // 退款成功 → 把对应 license 标记 REVOKED
+  // 退款成功 → 把对应 license 标记 REVOKED + 推广归因记录标记退款
   if (status === "success") {
     const r = db
-      .prepare(`SELECT license_key FROM refunds WHERE out_refund_no = ?`)
-      .get(event.out_refund_no) as { license_key: string | null } | undefined;
+      .prepare(
+        `SELECT license_key, out_trade_no FROM refunds WHERE out_refund_no = ?`,
+      )
+      .get(event.out_refund_no) as
+      | { license_key: string | null; out_trade_no: string }
+      | undefined;
     if (r?.license_key) {
       db.prepare(
         `UPDATE licenses
             SET note = COALESCE(note, '') || 'REVOKED:refund:${event.out_refund_no}:' || datetime('now')
           WHERE key = ? AND note NOT LIKE 'REVOKED%'`,
       ).run(r.license_key);
+    }
+    // 同步把推广归因标记退款,统计时排除;运营无需为退款单结算
+    if (r?.out_trade_no) {
+      db.prepare(
+        `UPDATE invite_redemptions
+            SET refund_at = COALESCE(refund_at, datetime('now'))
+          WHERE buyer_order_id = ?`,
+      ).run(r.out_trade_no);
     }
   }
 

@@ -999,6 +999,429 @@ adminRouter.get("/portal", (c) => {
   return c.html(layout("门户访问", body));
 });
 
+// ── 推广码(v0.3.0)──────────────────────────────────────────────────────
+//   运营手动签发邀请码给推广大使,买家在客户端升级对话框输入码,后台
+//   自动归因。这里提供:列表 + 新建 + 编辑 + 单码订单查询 + CSV 导出。
+
+adminRouter.get("/invites", (c) => {
+  const guard = requireSession(c);
+  if (guard !== true) return guard;
+  const { db } = c.var.app;
+  const rows = db
+    .prepare(
+      `SELECT ic.code, ic.ambassador, ic.contact, ic.status, ic.commission_cents,
+              ic.note, ic.created_at, ic.expires_at,
+              COALESCE((
+                SELECT COUNT(*) FROM invite_redemptions ir
+                 WHERE ir.code = ic.code AND ir.refund_at IS NULL
+              ), 0) AS valid_count,
+              COALESCE((
+                SELECT COUNT(*) FROM invite_redemptions ir
+                 WHERE ir.code = ic.code AND ir.refund_at IS NULL
+                   AND ir.settled_at IS NULL
+              ), 0) AS pending_count
+         FROM invite_codes ic
+        ORDER BY ic.created_at DESC`,
+    )
+    .all() as Array<{
+    code: string;
+    ambassador: string;
+    contact: string | null;
+    status: string;
+    commission_cents: number;
+    note: string | null;
+    created_at: string;
+    expires_at: string | null;
+    valid_count: number;
+    pending_count: number;
+  }>;
+
+  const tbody = rows
+    .map((r) => {
+      const statusChip =
+        r.status === "active"
+          ? `<span class="chip" style="color:#16a34a;border-color:#86efac;background:rgba(34,197,94,0.08);">启用</span>`
+          : `<span class="chip chip-muted">已停用</span>`;
+      const pendingCash =
+        r.pending_count > 0 && r.commission_cents > 0
+          ? `<span style="color:#dc2626;font-weight:600;">¥${((r.pending_count * r.commission_cents) / 100).toFixed(2)}</span>`
+          : "—";
+      return `<tr>
+  <td class="mono">${htmlEscape(r.code)}</td>
+  <td>${htmlEscape(r.ambassador)}</td>
+  <td class="mono" style="font-size:11px;">${htmlEscape(r.contact ?? "—")}</td>
+  <td>${statusChip}</td>
+  <td style="text-align:center;">${r.valid_count}</td>
+  <td>${pendingCash}</td>
+  <td>¥${(r.commission_cents / 100).toFixed(2)}</td>
+  <td style="font-size:11px;color:var(--text-muted);">${htmlEscape(formatDate(r.created_at) ?? "—")}</td>
+  <td>
+    <a class="btn" href="/admin/invites/${encodeURIComponent(r.code)}/orders" style="padding:4px 8px;font-size:11px;">订单</a>
+    <a class="btn" href="/admin/invites/${encodeURIComponent(r.code)}/edit" style="padding:4px 8px;font-size:11px;">编辑</a>
+  </td>
+</tr>`;
+    })
+    .join("");
+
+  const body = `
+<h1>推广码</h1>
+<div class="row" style="justify-content:space-between;margin-bottom:12px;gap:8px;">
+  <div>
+    <a class="btn primary" href="/admin/invites/new">+ 新建邀请码</a>
+    <a class="btn" href="/admin/invites/export.csv">导出全部归因订单 (CSV)</a>
+  </div>
+  <span style="color:var(--text-muted);font-size:11px;">共 ${rows.length} 个码</span>
+</div>
+<table>
+  <thead><tr>
+    <th>邀请码</th><th>大使</th><th>联系方式</th><th>状态</th>
+    <th>归因订单数</th><th>待结算金额</th><th>单笔分成</th><th>创建时间</th><th>操作</th>
+  </tr></thead>
+  <tbody>${tbody || `<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--text-muted);">暂无邀请码,点击"新建邀请码"创建。</td></tr>`}</tbody>
+</table>`;
+  return c.html(layout("推广码", body));
+});
+
+adminRouter.get("/invites/new", (c) => {
+  const guard = requireSession(c);
+  if (guard !== true) return guard;
+  return c.html(layout("新建邀请码", renderInviteForm(null)));
+});
+
+adminRouter.post("/invites/new", async (c) => {
+  const guard = requireSession(c);
+  if (guard !== true) return guard;
+  const { db } = c.var.app;
+  const form = await c.req.formData();
+  const code = String(form.get("code") ?? "").trim().toUpperCase();
+  const ambassador = String(form.get("ambassador") ?? "").trim();
+  const contact = String(form.get("contact") ?? "").trim() || null;
+  const commission = parseInt(String(form.get("commission") ?? "0"), 10);
+  const note = String(form.get("note") ?? "").trim() || null;
+  const expires_at = String(form.get("expires_at") ?? "").trim() || null;
+
+  if (!/^[A-Z0-9-]{4,32}$/.test(code)) {
+    return c.text("码格式错误:仅允许大写字母、数字、短横线,长度 4-32", 400);
+  }
+  if (!ambassador) {
+    return c.text("大使名称不能为空", 400);
+  }
+
+  try {
+    db.prepare(
+      `INSERT INTO invite_codes
+         (code, ambassador, contact, status, commission_cents, note, expires_at)
+       VALUES (?, ?, ?, 'active', ?, ?, ?)`,
+    ).run(
+      code,
+      ambassador,
+      contact,
+      isFinite(commission) ? commission : 0,
+      note,
+      expires_at,
+    );
+  } catch (e: any) {
+    if (String(e).includes("UNIQUE")) {
+      return c.text(`邀请码 ${code} 已存在`, 409);
+    }
+    throw e;
+  }
+  return c.redirect("/admin/invites");
+});
+
+adminRouter.get("/invites/:code/edit", (c) => {
+  const guard = requireSession(c);
+  if (guard !== true) return guard;
+  const { db } = c.var.app;
+  const code = c.req.param("code");
+  const row = db
+    .prepare(`SELECT * FROM invite_codes WHERE code = ?`)
+    .get(code) as any;
+  if (!row) return c.text("not found", 404);
+  return c.html(layout(`编辑 ${code}`, renderInviteForm(row)));
+});
+
+adminRouter.post("/invites/:code/edit", async (c) => {
+  const guard = requireSession(c);
+  if (guard !== true) return guard;
+  const { db } = c.var.app;
+  const code = c.req.param("code");
+  const form = await c.req.formData();
+  const ambassador = String(form.get("ambassador") ?? "").trim();
+  const contact = String(form.get("contact") ?? "").trim() || null;
+  const status = String(form.get("status") ?? "active");
+  const commission = parseInt(String(form.get("commission") ?? "0"), 10);
+  const note = String(form.get("note") ?? "").trim() || null;
+  const expires_at = String(form.get("expires_at") ?? "").trim() || null;
+
+  db.prepare(
+    `UPDATE invite_codes
+        SET ambassador = ?, contact = ?, status = ?,
+            commission_cents = ?, note = ?, expires_at = ?
+      WHERE code = ?`,
+  ).run(
+    ambassador,
+    contact,
+    status === "active" ? "active" : "disabled",
+    isFinite(commission) ? commission : 0,
+    note,
+    expires_at,
+    code,
+  );
+  return c.redirect("/admin/invites");
+});
+
+adminRouter.get("/invites/:code/orders", (c) => {
+  const guard = requireSession(c);
+  if (guard !== true) return guard;
+  const { db } = c.var.app;
+  const code = c.req.param("code");
+  const info = db
+    .prepare(
+      `SELECT code, ambassador, commission_cents FROM invite_codes WHERE code = ?`,
+    )
+    .get(code) as
+    | { code: string; ambassador: string; commission_cents: number }
+    | undefined;
+  if (!info) return c.text("not found", 404);
+
+  const rows = db
+    .prepare(
+      `SELECT id, buyer_order_id, buyer_fp, paid_at, paid_amount_cents,
+              refund_at, settled_at, settle_note
+         FROM invite_redemptions
+        WHERE code = ?
+        ORDER BY paid_at DESC`,
+    )
+    .all(code) as Array<{
+    id: number;
+    buyer_order_id: string;
+    buyer_fp: string | null;
+    paid_at: string;
+    paid_amount_cents: number;
+    refund_at: string | null;
+    settled_at: string | null;
+    settle_note: string | null;
+  }>;
+
+  const tbody = rows
+    .map((r) => {
+      let statusChip = "";
+      if (r.refund_at) {
+        statusChip = `<span class="chip" style="color:#92400e;border-color:#fde68a;background:rgba(245,158,11,0.1);">退款</span>`;
+      } else if (r.settled_at) {
+        statusChip = `<span class="chip" style="color:#16a34a;border-color:#86efac;background:rgba(34,197,94,0.08);">已结算</span>`;
+      } else {
+        statusChip = `<span class="chip">待结算</span>`;
+      }
+      const settleBtn =
+        !r.refund_at && !r.settled_at
+          ? `<form method="POST" action="/admin/invites/redemption/${r.id}/settle" style="display:inline;margin:0;">
+               <input type="text" name="note" placeholder="结算备注" style="width:100px;font-size:11px;padding:2px 4px;">
+               <button class="btn primary" type="submit" style="padding:3px 8px;font-size:11px;">标记已结算</button>
+             </form>`
+          : r.settled_at
+            ? `<span style="font-size:11px;color:var(--text-muted);">${htmlEscape(r.settle_note ?? "")}</span>`
+            : "";
+      return `<tr>
+  <td class="mono">${htmlEscape(r.buyer_order_id)}</td>
+  <td>¥${(r.paid_amount_cents / 100).toFixed(2)}</td>
+  <td>${htmlEscape(formatDate(r.paid_at) ?? "—")}</td>
+  <td>${statusChip}</td>
+  <td>${htmlEscape(formatDate(r.settled_at) ?? "—")}</td>
+  <td>${settleBtn}</td>
+</tr>`;
+    })
+    .join("");
+
+  const validCount = rows.filter((r) => !r.refund_at).length;
+  const pendingCount = rows.filter((r) => !r.refund_at && !r.settled_at).length;
+  const pendingAmount = pendingCount * info.commission_cents;
+
+  const body = `
+<h1>${htmlEscape(info.code)} · ${htmlEscape(info.ambassador)}</h1>
+<div class="stat-grid">
+  <div class="stat"><div class="stat-label">有效订单数</div><div class="stat-value">${validCount}</div></div>
+  <div class="stat"><div class="stat-label">待结算订单</div><div class="stat-value">${pendingCount}</div></div>
+  <div class="stat"><div class="stat-label">待结算金额</div><div class="stat-value">¥${(pendingAmount / 100).toFixed(2)}</div></div>
+  <div class="stat"><div class="stat-label">单笔分成</div><div class="stat-value">¥${(info.commission_cents / 100).toFixed(2)}</div></div>
+</div>
+<div style="margin-bottom:12px;">
+  <a class="btn" href="/admin/invites">← 返回列表</a>
+  <a class="btn" href="/admin/invites/${encodeURIComponent(code)}/export.csv">导出本码 CSV</a>
+</div>
+<table>
+  <thead><tr><th>订单号</th><th>实付</th><th>支付时间</th><th>状态</th><th>结算时间</th><th>操作</th></tr></thead>
+  <tbody>${tbody || `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted);">还没有归因订单。</td></tr>`}</tbody>
+</table>`;
+  return c.html(layout(`${info.code} 订单`, body));
+});
+
+adminRouter.post("/invites/redemption/:id/settle", async (c) => {
+  const guard = requireSession(c);
+  if (guard !== true) return guard;
+  const { db } = c.var.app;
+  const id = parseInt(c.req.param("id"), 10);
+  const form = await c.req.formData();
+  const note = String(form.get("note") ?? "").trim() || null;
+  const row = db
+    .prepare(`SELECT code FROM invite_redemptions WHERE id = ?`)
+    .get(id) as { code: string } | undefined;
+  if (!row) return c.text("not found", 404);
+  db.prepare(
+    `UPDATE invite_redemptions
+        SET settled_at = datetime('now'), settle_note = ?
+      WHERE id = ? AND settled_at IS NULL AND refund_at IS NULL`,
+  ).run(note, id);
+  return c.redirect(`/admin/invites/${encodeURIComponent(row.code)}/orders`);
+});
+
+// CSV 导出 —— 全部归因订单(便于运营做月度结算 Excel)
+adminRouter.get("/invites/export.csv", (c) => {
+  const guard = requireSession(c);
+  if (guard !== true) return guard;
+  const { db } = c.var.app;
+  const rows = db
+    .prepare(
+      `SELECT ir.code, ic.ambassador, ic.contact, ic.commission_cents,
+              ir.buyer_order_id, ir.paid_amount_cents, ir.paid_at,
+              ir.refund_at, ir.settled_at, ir.settle_note
+         FROM invite_redemptions ir
+         JOIN invite_codes ic ON ic.code = ir.code
+        ORDER BY ir.paid_at DESC`,
+    )
+    .all() as any[];
+  return c.body(toCsv(rows), 200, {
+    "Content-Type": "text/csv; charset=utf-8",
+    "Content-Disposition": `attachment; filename="invite-redemptions-${new Date().toISOString().slice(0, 10)}.csv"`,
+  });
+});
+
+// 单个码的 CSV
+adminRouter.get("/invites/:code/export.csv", (c) => {
+  const guard = requireSession(c);
+  if (guard !== true) return guard;
+  const { db } = c.var.app;
+  const code = c.req.param("code");
+  const rows = db
+    .prepare(
+      `SELECT ir.code, ic.ambassador, ic.contact, ic.commission_cents,
+              ir.buyer_order_id, ir.paid_amount_cents, ir.paid_at,
+              ir.refund_at, ir.settled_at, ir.settle_note
+         FROM invite_redemptions ir
+         JOIN invite_codes ic ON ic.code = ir.code
+        WHERE ir.code = ?
+        ORDER BY ir.paid_at DESC`,
+    )
+    .all(code) as any[];
+  return c.body(toCsv(rows), 200, {
+    "Content-Type": "text/csv; charset=utf-8",
+    "Content-Disposition": `attachment; filename="invite-${code}-${new Date().toISOString().slice(0, 10)}.csv"`,
+  });
+});
+
+function renderInviteForm(
+  existing:
+    | {
+        code: string;
+        ambassador: string;
+        contact: string | null;
+        status: string;
+        commission_cents: number;
+        note: string | null;
+        expires_at: string | null;
+      }
+    | null,
+): string {
+  const isNew = !existing;
+  const action = isNew ? "/admin/invites/new" : `/admin/invites/${encodeURIComponent(existing.code)}/edit`;
+  return `
+<h1>${isNew ? "新建邀请码" : `编辑 ${htmlEscape(existing!.code)}`}</h1>
+<form method="POST" action="${action}" class="card" style="max-width: 600px;">
+  <label>邀请码 ${isNew ? "(只能大写字母+数字+短横线,4-32 字符)" : ""}</label>
+  ${
+    isNew
+      ? `<input name="code" required pattern="[A-Z0-9-]{4,32}" placeholder="例如 DOCMIND-AB12" autocomplete="off">`
+      : `<input value="${htmlEscape(existing!.code)}" disabled style="opacity:0.6;">`
+  }
+
+  <label style="margin-top:14px;">大使昵称 / 平台名</label>
+  <input name="ambassador" required placeholder="例如 B 站 UP 某某 / 公众号 某某" value="${htmlEscape(existing?.ambassador ?? "")}" autocomplete="off">
+
+  <label style="margin-top:14px;">联系方式(微信号 / 邮箱,运营结算用)</label>
+  <input name="contact" placeholder="可选" value="${htmlEscape(existing?.contact ?? "")}" autocomplete="off">
+
+  <label style="margin-top:14px;">每单分成(单位:分,仅记账参考,不实付)</label>
+  <input name="commission" type="number" min="0" step="1" value="${existing?.commission_cents ?? 0}">
+  <div style="color:var(--text-muted);font-size:11px;margin-top:4px;">
+    填 500 = ¥5,1000 = ¥10。这个字段只是给运营算账的依据,后端不会自动到账。
+  </div>
+
+  <label style="margin-top:14px;">过期时间(可选,ISO 格式 YYYY-MM-DD)</label>
+  <input name="expires_at" placeholder="2027-01-01,留空表示永久" value="${htmlEscape(existing?.expires_at ?? "")}">
+
+  ${
+    !isNew
+      ? `<label style="margin-top:14px;">状态</label>
+         <select name="status">
+           <option value="active" ${existing?.status === "active" ? "selected" : ""}>启用</option>
+           <option value="disabled" ${existing?.status === "disabled" ? "selected" : ""}>停用</option>
+         </select>`
+      : ""
+  }
+
+  <label style="margin-top:14px;">备注</label>
+  <textarea name="note" rows="3" placeholder="合作日期、平台、合作方式等内部备注">${htmlEscape(existing?.note ?? "")}</textarea>
+
+  <div style="margin-top:20px;display:flex;gap:8px;">
+    <button class="primary" type="submit">${isNew ? "创建" : "保存"}</button>
+    <a class="btn" href="/admin/invites">取消</a>
+  </div>
+</form>`;
+}
+
+function toCsv(rows: any[]): string {
+  const header = [
+    "邀请码",
+    "大使",
+    "联系方式",
+    "单笔分成(元)",
+    "订单号",
+    "实付金额(元)",
+    "支付时间",
+    "退款时间",
+    "结算时间",
+    "结算备注",
+  ];
+  const esc = (v: any) => {
+    if (v == null) return "";
+    const s = String(v);
+    if (/[,"\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const lines = [header.join(",")];
+  for (const r of rows) {
+    lines.push(
+      [
+        r.code,
+        r.ambassador,
+        r.contact ?? "",
+        ((r.commission_cents ?? 0) / 100).toFixed(2),
+        r.buyer_order_id,
+        ((r.paid_amount_cents ?? 0) / 100).toFixed(2),
+        r.paid_at ?? "",
+        r.refund_at ?? "",
+        r.settled_at ?? "",
+        r.settle_note ?? "",
+      ]
+        .map(esc)
+        .join(","),
+    );
+  }
+  // UTF-8 BOM 让 Excel 打开 CSV 不乱码
+  return "﻿" + lines.join("\n");
+}
+
 // ── helpers ────────────────────────────────────────────────────────────────
 function formatDate(s: string | null | undefined): string | null {
   if (!s) return null;
