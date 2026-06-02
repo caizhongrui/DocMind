@@ -24,10 +24,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0    # 必须深 clone + 拉 tags,否则 git tag -l --format
-                            # 找不到 annotated message,fallback 到 GitHub 自动
-                            # 生成的"Full Changelog: ..."链接,doc-api 收到的
-                            # 就是个无意义占位符
+          fetch-depth: 0
+          fetch-tags: true  # 必须显式拉 tag 注释对象 —— 默认只拉 ref 指向的
+                            # commit,git tag -l --format='%(contents:body)'
+                            # 看不到我们写的中文 changelog
 
       - name: Download release assets
         env:

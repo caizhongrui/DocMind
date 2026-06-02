@@ -177,7 +177,11 @@ jobs:
       # 上传到 GitHub Release 成功但 doc-api 没收到新版本的根因)。
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0           # need full tag history for git tag -l --format
+          fetch-depth: 0           # full commit history
+          fetch-tags: true         # **拉 tag 注释对象** —— 默认只拉 ref
+                                   # 不带 annotation,导致 git tag -l --format
+                                   # 拿不到我们写的中文 changelog,fallback 到
+                                   # GitHub 自动生成的"chore(release): 0.3.0"
 
       - uses: actions/download-artifact@v4
         with:
