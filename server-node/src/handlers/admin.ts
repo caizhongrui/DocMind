@@ -1335,34 +1335,45 @@ function renderInviteForm(
 ): string {
   const isNew = !existing;
   const action = isNew ? "/admin/invites/new" : `/admin/invites/${encodeURIComponent(existing.code)}/edit`;
+  // scoped CSS:全局 CSS 没把 label 设成 block、input 没全宽,这里补一下,
+  // 避免 label+input+label+input 全挤到一行
   return `
+<style>
+.invite-form { max-width: 600px; }
+.invite-form label { display: block; font-size: 11px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono);
+  margin: 14px 0 6px; }
+.invite-form label:first-of-type { margin-top: 0; }
+.invite-form input, .invite-form select, .invite-form textarea { width: 100%; box-sizing: border-box; }
+.invite-form textarea { font-family: inherit; resize: vertical; }
+.invite-form .hint { color: var(--text-muted); font-size: 11px; margin-top: 4px; }
+.invite-form .actions { margin-top: 22px; display: flex; gap: 8px; }
+</style>
 <h1>${isNew ? "新建邀请码" : `编辑 ${htmlEscape(existing!.code)}`}</h1>
-<form method="POST" action="${action}" class="card" style="max-width: 600px;">
-  <label>邀请码 ${isNew ? "(只能大写字母+数字+短横线,4-32 字符)" : ""}</label>
+<form method="POST" action="${action}" class="card invite-form">
+  <label>邀请码 ${isNew ? "(只能大写字母 + 数字 + 短横线,4-32 字符)" : ""}</label>
   ${
     isNew
       ? `<input name="code" required pattern="[A-Z0-9-]{4,32}" placeholder="例如 DOCMIND-AB12" autocomplete="off">`
       : `<input value="${htmlEscape(existing!.code)}" disabled style="opacity:0.6;">`
   }
 
-  <label style="margin-top:14px;">大使昵称 / 平台名</label>
+  <label>大使昵称 / 平台名</label>
   <input name="ambassador" required placeholder="例如 B 站 UP 某某 / 公众号 某某" value="${htmlEscape(existing?.ambassador ?? "")}" autocomplete="off">
 
-  <label style="margin-top:14px;">联系方式(微信号 / 邮箱,运营结算用)</label>
+  <label>联系方式(微信号 / 邮箱,运营结算用)</label>
   <input name="contact" placeholder="可选" value="${htmlEscape(existing?.contact ?? "")}" autocomplete="off">
 
-  <label style="margin-top:14px;">每单分成(单位:分,仅记账参考,不实付)</label>
+  <label>每单分成(单位:分,仅记账参考,不实付)</label>
   <input name="commission" type="number" min="0" step="1" value="${existing?.commission_cents ?? 0}">
-  <div style="color:var(--text-muted);font-size:11px;margin-top:4px;">
-    填 500 = ¥5,1000 = ¥10。这个字段只是给运营算账的依据,后端不会自动到账。
-  </div>
+  <div class="hint">填 500 = ¥5,1000 = ¥10。这个字段只是给运营算账的依据,后端不会自动到账。</div>
 
-  <label style="margin-top:14px;">过期时间(可选,ISO 格式 YYYY-MM-DD)</label>
+  <label>过期时间(可选,ISO 格式 YYYY-MM-DD)</label>
   <input name="expires_at" placeholder="2027-01-01,留空表示永久" value="${htmlEscape(existing?.expires_at ?? "")}">
 
   ${
     !isNew
-      ? `<label style="margin-top:14px;">状态</label>
+      ? `<label>状态</label>
          <select name="status">
            <option value="active" ${existing?.status === "active" ? "selected" : ""}>启用</option>
            <option value="disabled" ${existing?.status === "disabled" ? "selected" : ""}>停用</option>
@@ -1370,10 +1381,10 @@ function renderInviteForm(
       : ""
   }
 
-  <label style="margin-top:14px;">备注</label>
+  <label>备注</label>
   <textarea name="note" rows="3" placeholder="合作日期、平台、合作方式等内部备注">${htmlEscape(existing?.note ?? "")}</textarea>
 
-  <div style="margin-top:20px;display:flex;gap:8px;">
+  <div class="actions">
     <button class="primary" type="submit">${isNew ? "创建" : "保存"}</button>
     <a class="btn" href="/admin/invites">取消</a>
   </div>
